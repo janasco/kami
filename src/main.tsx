@@ -5,7 +5,11 @@ import { LandingPage } from './LandingPage'
 import './styles.css'
 import './landing.css'
 
-const isEditorRoute = window.location.pathname.replace(/\/$/, '') === '/editor'
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, '')
+const appPath = window.location.pathname.startsWith(basePath)
+  ? window.location.pathname.slice(basePath.length) || '/'
+  : window.location.pathname
+const isEditorRoute = appPath.replace(/\/$/, '') === '/editor'
 
 document.documentElement.classList.toggle('landing-mode', !isEditorRoute)
 document.body.classList.toggle('landing-mode', !isEditorRoute)

@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+const editorHref = `${import.meta.env.BASE_URL}editor`
+
 const ArrowIcon = () => (
   <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
     <path d="M4 10h11M11 6l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -118,7 +120,7 @@ export function LandingPage() {
             <a href="#workflow">How it works</a>
             <a href="https://github.com/janasco/kami">GitHub</a>
           </nav>
-          <a className="landing-button landing-button--small" href="/editor">Open editor <ArrowIcon /></a>
+          <a className="landing-button landing-button--small" href={editorHref}>Open editor <ArrowIcon /></a>
         </div>
       </header>
 
@@ -130,7 +132,7 @@ export function LandingPage() {
             <h1>Raw captures.<br /><em>Remarkable</em> store screens.</h1>
             <p className="landing-hero__lede">Turn everyday app moments into a polished screenshot suite—without wrestling with a heavyweight design tool.</p>
             <div className="landing-hero__actions">
-              <a className="landing-button" href="/editor">Create your screenshots <ArrowIcon /></a>
+              <a className="landing-button" href={editorHref}>Create your screenshots <ArrowIcon /></a>
               <a className="landing-button landing-button--secondary" href="#features">See what’s inside</a>
             </div>
             <div className="landing-hero__notes" aria-label="Product benefits">
@@ -222,7 +224,7 @@ export function LandingPage() {
                   <span className="landing-feature__number">04</span>
                   <h3>Get every image at the exact profile size.</h3>
                   <p>Export a clean ZIP of PNGs at the dimensions selected for each supported phone and tablet profile.</p>
-                  <a href="/editor">View export profiles <ArrowIcon /></a>
+                  <a href={editorHref}>View export profiles <ArrowIcon /></a>
                 </div>
                 <div className="landing-export-demo" aria-hidden="true">
                   <div className="landing-export-demo__header"><span>Export slides</span><b>Export ZIP</b></div>
@@ -259,7 +261,7 @@ export function LandingPage() {
               <span className="landing-kicker">Your next screenshot set starts here</span>
               <h2>Give your app the<br />presentation it deserves.</h2>
               <p>Open the editor and turn your captures into a clear, cohesive app-store story.</p>
-              <a className="landing-button landing-button--cream" href="/editor">Start creating <ArrowIcon /></a>
+              <a className="landing-button landing-button--cream" href={editorHref}>Start creating <ArrowIcon /></a>
             </div>
           </div>
         </section>
@@ -270,7 +272,7 @@ export function LandingPage() {
           <Brand />
           <p>Thoughtful screenshot tools for independent makers.</p>
           <nav aria-label="Footer navigation">
-            <a href="/editor">Local editor</a>
+            <a href={editorHref}>Local editor</a>
             <a href="https://github.com/janasco/kami" target="_blank" rel="noreferrer">GitHub ↗</a>
           </nav>
         </div>
