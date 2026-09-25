@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+.next/
+coverage/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Local editor and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Generated export bundles and temporary media
+kami-exports/
+.tmp/
+*.tmp
+
+# Keep screenshot-studio.json tracked: it is the reproducible project file.

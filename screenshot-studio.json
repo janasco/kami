@@ -1,0 +1,159 @@
+{
+  "$schema": "./schemas/screenshot-studio.v1.json",
+  "version": 1,
+  "revision": {
+    "number": 1,
+    "createdAt": "2026-09-25T00:00:00Z",
+    "message": "Initial project"
+  },
+  "project": {
+    "id": "project-main",
+    "name": "Untitled screenshot project",
+    "description": "",
+    "defaultLocale": "en-US"
+  },
+  "localization": {
+    "locales": ["en-US"],
+    "messages": {
+      "slide-1.title": {
+        "en-US": "Your idea, beautifully presented."
+      },
+      "slide-1.subtitle": {
+        "en-US": "Turn everyday app moments into scroll-stopping stories."
+      }
+    }
+  },
+  "assets": [],
+  "scene": {
+    "unit": "px",
+    "origin": "top-left",
+    "coordinateSpace": "global",
+    "width": 1080,
+    "height": 1920
+  },
+  "canvases": [
+    {
+      "id": "main-story",
+      "name": "Main story",
+      "mode": "connected",
+      "slideIds": ["slide-1"]
+    }
+  ],
+  "slides": [
+    {
+      "id": "slide-1",
+      "canvasId": "main-story",
+      "name": "Slide 1",
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "width": 1080,
+        "height": 1920
+      },
+      "layoutId": "portrait-store",
+      "themeId": "midnight",
+      "layers": [
+        {
+          "id": "title",
+          "type": "text",
+          "textKey": "slide-1.title",
+          "frame": {
+            "x": 80,
+            "y": 120,
+            "width": 920,
+            "height": 180
+          },
+          "zIndex": 1
+        },
+        {
+          "id": "subtitle",
+          "type": "text",
+          "textKey": "slide-1.subtitle",
+          "frame": {
+            "x": 80,
+            "y": 320,
+            "width": 840,
+            "height": 80
+          },
+          "zIndex": 2
+        }
+      ]
+    }
+  ],
+  "layouts": [
+    {
+      "id": "portrait-store",
+      "name": "Portrait store",
+      "version": 1,
+      "frame": {
+        "width": 1080,
+        "height": 1920
+      },
+      "slots": [
+        {
+          "id": "title",
+          "type": "text",
+          "required": false
+        },
+        {
+          "id": "screenshot",
+          "type": "image",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "themes": [
+    {
+      "id": "midnight",
+      "name": "Midnight",
+      "version": 1,
+      "tokens": {
+        "colors": {
+          "background": "#151525",
+          "accent": "#5b4cf0",
+          "text": "#ffffff"
+        }
+      }
+    }
+  ],
+  "outputVariants": [
+    {
+      "id": "variant-en-us",
+      "name": "English",
+      "canvasId": "main-story",
+      "locale": "en-US",
+      "themeId": "midnight",
+      "slideIds": ["slide-1"],
+      "enabled": true
+    }
+  ],
+  "exportProfiles": [
+    {
+      "id": "google-play",
+      "name": "Google Play",
+      "format": "png",
+      "sizes": [
+        {
+          "width": 1080,
+          "height": 1920
+        }
+      ],
+      "variantIds": ["variant-en-us"],
+      "status": "planned"
+    },
+    {
+      "id": "app-store",
+      "name": "App Store",
+      "format": "png",
+      "sizes": [
+        {
+          "width": 1242,
+          "height": 2688
+        }
+      ],
+      "variantIds": ["variant-en-us"],
+      "status": "planned"
+    }
+  ]
+}

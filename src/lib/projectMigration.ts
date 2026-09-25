@@ -1,0 +1,133 @@
+import {
+  createDefaultAccentShapeStyle,
+  createDefaultLayerSettings,
+  createDefaultLayerTransforms,
+  DEFAULT_DEVICE_FRAME_ID,
+  DEFAULT_SLIDE_TRANSFORM,
+} from '../data'
+import { validateProjectDocument, validationSummary, type ValidationIssue } from './projectValidation'
+import { PROJECT_VERSION } from './projectValidation'
+
+export interface MigrationReport {
+  fromVersion: number
+  toVersion: number
+  applied: string[]
+  warnings: ValidationIssue[]
+}
+
+export type MigrationResult =
+  | { ok: true; document: Record<string, unknown>; report: MigrationReport }
+  | { ok: false; error: string; issues: ValidationIssue[]; report?: MigrationReport }
+
+type JsonRecord = Record<string, unknown>
+
+const isRecord = (value: unknown): value is JsonRecord =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const clone = <T>(value: T): T => structuredClone(value)
+
+const defaultTransform = () => ({ ...DEFAULT_SLIDE_TRANSFORM })
+
+/** Apply only deterministic, non-semantic defaults for the v1 editor format. */
+const applyV1Defaults = (source: JsonRecord): JsonRecord => {
+  const document = clone(source)
+  const project = isRecord(document.project) ? document.project : {}
+  if (project.description === undefined) project.description = ''
+  if (project.activeLocale === undefined && isRecord(document.localization) && Array.isArray(document.localization.locales) && typeof document.localization.locales[0] === 'string') project.activeLocale = document.localization.locales[0]
+  if (project.activeLocale === undefined && typeof project.defaultLocale === 'string') project.activeLocale = project.defaultLocale
+  document.project = project
+
+  if (document.localization === undefined) {
+    document.localization = { locales: [typeof project.defaultLocale === 'string' ? project.defaultLocale : 'en-US'], messages: {} }
+  }
+  if (document.assets === undefined) document.assets = []
+  if (document.scene === undefined) document.scene = { unit: 'px', origin: 'top-left', coordinateSpace: 'global', width: 1080, height: 1920 }
+  if (document.layouts === undefined) document.layouts = []
+  if (document.themes === undefined) document.themes = []
+  if (document.outputVariants === undefined) document.outputVariants = []
+
+  if (Array.isArray(document.canvases)) document.canvases.forEach((canvas) => {
+    if (!isRecord(canvas)) return
+    if (canvas.name === undefined) canvas.name = 'Main story'
+    if (canvas.mode === undefined) canvas.mode = 'isolated'
+    if (canvas.slideIds === undefined && Array.isArray(document.slides)) canvas.slideIds = document.slides.map((slide) => isRecord(slide) ? slide.id : '').filter((id): id is string => typeof id === 'string')
+  })
+
+  if (Array.isArray(document.slides)) document.slides.forEach((slide) => {
+    if (!isRecord(slide)) return
+    if (slide.deviceFrameId === undefined) slide.deviceFrameId = DEFAULT_DEVICE_FRAME_ID
+    if (slide.transform === undefined) slide.transform = defaultTransform()
+    if (!Array.isArray(slide.layers)) return
+    const defaults = createDefaultLayerTransforms()
+    const defaultSettings = createDefaultLayerSettings()
+    slide.layers.forEach((layer, layerIndex) => {
+      if (!isRecord(layer)) return
+      if (layer.zIndex === undefined) layer.zIndex = layerIndex
+      if (layer.transform === undefined) layer.transform = defaultTransform()
+      const semantic = typeof layer.id === 'string' && Object.prototype.hasOwnProperty.call(defaults, layer.id)
+        ? layer.id as keyof typeof defaults
+        : null
+      if (layer.opacity === undefined) layer.opacity = semantic ? defaultSettings[semantic].opacity : 1
+      if (layer.visible === undefined) layer.visible = true
+      if (semantic === 'accent-shape' && layer.style === undefined) layer.style = createDefaultAccentShapeStyle()
+    })
+  })
+
+  if (Array.isArray(document.layouts)) document.layouts.forEach((layout) => {
+    if (!isRecord(layout)) return
+    if (isRecord(layout.frame)) {
+      if (layout.frame.x === undefined) layout.frame.x = 0
+      if (layout.frame.y === undefined) layout.frame.y = 0
+    }
+  })
+
+  return document
+}
+
+/** Normalize the known v1 fixture spelling without accepting arbitrary layouts. */
+const migrateKnownV1Ids = (source: JsonRecord): JsonRecord => {
+  const document = clone(source)
+  if (Array.isArray(document.layouts)) document.layouts.forEach((layout) => {
+    if (isRecord(layout) && layout.id === 'portrait-store') layout.id = 'hero'
+  })
+  if (Array.isArray(document.slides)) document.slides.forEach((slide) => {
+    if (isRecord(slide) && slide.layoutId === 'portrait-store') slide.layoutId = 'hero'
+  })
+  return document
+}
+
+export function migrateProjectDocument(value: unknown): MigrationResult {
+  if (!isRecord(value)) {
+    const issues = [{ path: '$', code: 'invalid-type', message: 'The project root must be a JSON object.', severity: 'error' as const }]
+    return { ok: false, error: issues[0].message, issues }
+  }
+  if (typeof value.version !== 'number' || !Number.isInteger(value.version)) {
+    const issues = [{ path: '$.version', code: 'required', message: 'Project version must be an integer.', severity: 'error' as const }]
+    return { ok: false, error: issues[0].message, issues }
+  }
+  if (value.version > PROJECT_VERSION) {
+    const issues = [{ path: '$.version', code: 'newer-version', message: `This project uses version ${value.version}; this editor supports version ${PROJECT_VERSION} and will not downgrade it.`, severity: 'error' as const }]
+    return { ok: false, error: issues[0].message, issues }
+  }
+  if (value.version < 1) {
+    const issues = [{ path: '$.version', code: 'unsupported-version', message: 'No migration is available for this project version.', severity: 'error' as const }]
+    return { ok: false, error: issues[0].message, issues }
+  }
+
+  const preflight = validateProjectDocument(value, { allowLegacyLayouts: true })
+  if (!preflight.valid) return { ok: false, error: validationSummary(preflight.issues), issues: preflight.issues }
+
+  const report: MigrationReport = { fromVersion: value.version, toVersion: PROJECT_VERSION, applied: [], warnings: [] }
+  let document = applyV1Defaults(value)
+  const beforeKnownIds = JSON.stringify(document)
+  document = migrateKnownV1Ids(document)
+  if (JSON.stringify(document) !== beforeKnownIds) report.applied.push('v1: normalize legacy layout id')
+  if (value.version === PROJECT_VERSION) report.applied.push('v1: apply optional field defaults')
+
+  const validation = validateProjectDocument(document)
+  if (!validation.valid) return { ok: false, error: validationSummary(validation.issues), issues: validation.issues, report }
+  report.warnings = validation.issues
+  return { ok: true, document, report }
+}
+
+export const migrateProject = migrateProjectDocument

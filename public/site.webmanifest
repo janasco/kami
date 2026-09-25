@@ -1,0 +1,17 @@
+{
+  "name": "Kami",
+  "short_name": "Kami",
+  "description": "Create polished app screenshots in your browser.",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#fbfaf7",
+  "background_color": "#fbfaf7",
+  "icons": [
+    {
+      "src": "./og-image.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

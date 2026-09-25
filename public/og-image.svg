@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Kami — App Screenshot Studio</title>
+  <desc id="desc">Turn raw app captures into polished App Store and Google Play screenshot sets.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbfaf7"/>
+      <stop offset="1" stop-color="#ece9ff"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171624"/>
+      <stop offset="1" stop-color="#5b4cf0"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="24" stdDeviation="24" flood-color="#4036a4" flood-opacity=".22"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="1080" cy="50" r="220" fill="#ff795e" opacity=".18"/>
+  <circle cx="90" cy="610" r="190" fill="#70d6aa" opacity=".2"/>
+  <rect x="74" y="82" width="68" height="68" rx="20" fill="#201f28" transform="rotate(-2 108 116)"/>
+  <rect x="94" y="125" width="12" height="30" rx="6" fill="#a89cff" transform="rotate(33 100 140)"/>
+  <rect x="113" y="106" width="12" height="48" rx="6" fill="#fff" transform="rotate(33 119 130)"/>
+  <rect x="135" y="120" width="12" height="28" rx="6" fill="#ff795e" transform="rotate(33 141 134)"/>
+  <text x="170" y="130" fill="#201f28" font-family="Arial, sans-serif" font-size="36" font-weight="800">Kami</text>
+  <text x="74" y="270" fill="#201f28" font-family="Arial, sans-serif" font-size="72" font-weight="800">Raw captures.</text>
+  <text x="74" y="350" fill="#6558e8" font-family="Arial, sans-serif" font-size="72" font-weight="800" font-style="italic">Remarkable</text>
+  <text x="74" y="410" fill="#201f28" font-family="Arial, sans-serif" font-size="30" font-weight="600">store screens.</text>
+  <text x="76" y="480" fill="#6b6877" font-family="Arial, sans-serif" font-size="22">The focused App Screenshot Studio for solo makers.</text>
+  <g filter="url(#shadow)">
+    <rect x="760" y="74" width="310" height="478" rx="34" fill="url(#card)"/>
+    <rect x="782" y="96" width="266" height="434" rx="22" fill="#fff" opacity=".96"/>
+    <rect x="814" y="137" width="122" height="12" rx="6" fill="#d9d4ff"/>
+    <rect x="814" y="175" width="174" height="76" rx="16" fill="#eeeaff"/>
+    <rect x="814" y="270" width="202" height="198" rx="24" fill="#151525"/>
+    <rect x="848" y="294" width="134" height="150" rx="16" fill="#6558e8"/>
+    <rect x="870" y="320" width="90" height="10" rx="5" fill="#fff" opacity=".85"/>
+    <rect x="870" y="349" width="62" height="8" rx="4" fill="#fff" opacity=".5"/>
+    <circle cx="915" cy="398" r="25" fill="#ff795e" opacity=".9"/>
+    <rect x="814" y="488" width="118" height="10" rx="5" fill="#201f28" opacity=".12"/>
+  </g>
+  <rect x="632" y="488" width="258" height="54" rx="16" fill="#fff" stroke="#e5e1f5"/>
+  <text x="658" y="522" fill="#201f28" font-family="Arial, sans-serif" font-size="18" font-weight="700">{ }  screenshot-studio.json</text>
+</svg>

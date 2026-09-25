@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Kami</title>
+  <rect width="64" height="64" rx="18" fill="#201f28"/>
+  <path d="M20 14h8v36h-8z" fill="#a89cff"/>
+  <path d="m29 31 15-17h9L36 32l18 18h-9L29 36z" fill="#fff"/>
+  <circle cx="48" cy="14" r="6" fill="#ff795e"/>
+</svg>

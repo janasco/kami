@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kami.dev/schemas/screenshot-studio.v1.json",
+  "title": "Kami Screenshot Studio Project",
+  "type": "object",
+  "required": ["version", "project", "canvases", "slides", "exportProfiles"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "revision": { "$ref": "#/$defs/revision" },
+    "project": { "$ref": "#/$defs/project" },
+    "localization": { "$ref": "#/$defs/localization" },
+    "assets": { "type": "array", "items": { "$ref": "#/$defs/asset" } },
+    "scene": { "$ref": "#/$defs/scene" },
+    "canvases": { "type": "array", "items": { "$ref": "#/$defs/canvas" } },
+    "slides": { "type": "array", "items": { "$ref": "#/$defs/slide" } },
+    "layouts": { "type": "array", "items": { "$ref": "#/$defs/layout" } },
+    "themes": { "type": "array", "items": { "$ref": "#/$defs/theme" } },
+    "outputVariants": { "type": "array", "items": { "$ref": "#/$defs/outputVariant" } },
+    "exportProfiles": { "type": "array", "items": { "$ref": "#/$defs/exportProfile" } }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "id": { "type": "string", "minLength": 1 },
+    "frame": {
+      "type": "object",
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "revision": {
+      "type": "object",
+      "properties": {
+        "number": { "type": "integer", "minimum": 1 },
+        "parentId": { "type": ["string", "null"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "author": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "project": {
+      "type": "object",
+      "required": ["id", "name", "defaultLocale"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "defaultLocale": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "localization": {
+      "type": "object",
+      "required": ["locales", "messages"],
+      "properties": {
+        "locales": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "messages": { "type": "object", "additionalProperties": { "type": "object", "additionalProperties": { "type": "string" } } }
+      },
+      "additionalProperties": true
+    },
+    "asset": {
+      "type": "object",
+      "required": ["id", "kind", "path", "mimeType"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["screenshot", "icon", "font", "frame", "other"] },
+        "path": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+      },
+      "additionalProperties": true
+    },
+    "scene": {
+      "type": "object",
+      "required": ["unit", "origin", "coordinateSpace", "width", "height"],
+      "properties": {
+        "unit": { "const": "px" },
+        "origin": { "const": "top-left" },
+        "coordinateSpace": { "const": "global" },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "canvas": {
+      "type": "object",
+      "required": ["id", "name", "mode", "slideIds"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "mode": { "enum": ["connected", "isolated"] },
+        "slideIds": { "type": "array", "items": { "$ref": "#/$defs/id" } }
+      },
+      "additionalProperties": true
+    },
+    "layer": {
+      "type": "object",
+      "required": ["id", "type", "frame"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["image", "text", "shape"] },
+        "textKey": { "type": "string" },
+        "assetId": { "$ref": "#/$defs/id" },
+        "frame": { "$ref": "#/$defs/frame" },
+        "zIndex": { "type": "integer" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rotation": { "type": "number" },
+        "visible": { "type": "boolean" },
+        "fit": { "enum": ["cover", "contain", "fill"] }
+      },
+      "additionalProperties": true,
+      "oneOf": [
+        { "required": ["textKey"] },
+        { "required": ["assetId"] },
+        { "not": { "anyOf": [{ "required": ["textKey"] }, { "required": ["assetId"] }] } }
+      ]
+    },
+    "slide": {
+      "type": "object",
+      "required": ["id", "canvasId", "name", "frame", "layoutId", "themeId", "layers"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "canvasId": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "frame": { "$ref": "#/$defs/frame" },
+        "layoutId": { "$ref": "#/$defs/id" },
+        "themeId": { "$ref": "#/$defs/id" },
+        "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } }
+      },
+      "additionalProperties": true
+    },
+    "layout": {
+      "type": "object",
+      "required": ["id", "name", "version", "frame", "slots"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 },
+        "frame": { "$ref": "#/$defs/frame" },
+        "slots": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    },
+    "theme": {
+      "type": "object",
+      "required": ["id", "name", "version", "tokens"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 },
+        "tokens": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "outputVariant": {
+      "type": "object",
+      "required": ["id", "name", "canvasId", "locale", "themeId", "slideIds", "enabled"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "canvasId": { "$ref": "#/$defs/id" },
+        "locale": { "type": "string" },
+        "themeId": { "$ref": "#/$defs/id" },
+        "slideIds": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "enabled": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "exportProfile": {
+      "type": "object",
+      "required": ["id", "name", "format", "sizes", "variantIds", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "format": { "enum": ["png", "jpeg", "webp"] },
+        "sizes": { "type": "array", "items": { "type": "object", "required": ["width", "height"], "properties": { "width": { "type": "integer", "exclusiveMinimum": 0 }, "height": { "type": "integer", "exclusiveMinimum": 0 } } } },
+        "variantIds": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "status": { "enum": ["planned", "ready", "needs-assets", "invalid"] }
+      },
+      "additionalProperties": true
+    }
+  }
+}
