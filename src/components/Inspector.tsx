@@ -1,7 +1,11 @@
-import { createDefaultLayerTransforms, deviceFramePresets, exportProfiles, layouts, localeOptions, sanitizeLayerOpacity, slideLayerIds, slideLayerLabels, themes, TRANSFORM_SIZE_MAX, TRANSFORM_SIZE_MIN } from '../data'
+import { createDefaultLayerTransforms, exportProfiles, layouts, localeOptions, sanitizeLayerOpacity, slideLayerIds, slideLayerLabels, screenshotFitOptions, themes, TRANSFORM_SIZE_MAX, TRANSFORM_SIZE_MIN } from '../data'
+import { isFramelessDeviceId } from '../lib/devicePresets'
+import { DEFAULT_DEVICE_STATUS_BAR_TIME } from '../lib/deviceStatusBar'
+import { describeScreenshotFit } from '../lib/screenshotFit'
 import { getSlideText, translationFieldLabel } from '../lib/localization'
 import type { ExportPreflightResult } from '../lib/exportPreflight'
-import type { AccentShapeType, DeviceFrameId, ExportProfile, LayerId, LayerSettings, LayoutId, LocaleId, Slide, ThemeId } from '../types'
+import type { AccentShapeType, ExportProfile, LayerId, LayerSettings, LayoutId, LocaleId, Slide, ThemeId } from '../types'
+import { DeviceFramePicker } from './DeviceFramePicker'
 
 type NumericTransformField = 'x' | 'y' | 'scale' | 'rotation' | 'widthScale' | 'heightScale'
 
@@ -19,7 +23,7 @@ const preflightSlideLabel = (slideNumbers: number[]) => {
   return `Slides ${slideNumbers.join(', ')}`
 }
 
-interface InspectorProps {
+export interface InspectorProps {
   slide: Slide
   activeLocale: LocaleId
   onLocaleChange: (locale: LocaleId) => void
@@ -64,6 +68,7 @@ export function Inspector({
   ]
   const selectedTransform = slide.layerTransforms[selectedLayerId]
   const selectedSettings = slide.layerSettings[selectedLayerId]
+  const isFramelessDevice = isFramelessDeviceId(slide.deviceFrameId)
   const defaultTransforms = createDefaultLayerTransforms()
   const isDefaultTransform = transformNumericFields.every(
     (field) => selectedTransform[field] === defaultTransforms[selectedLayerId][field],
@@ -225,19 +230,62 @@ export function Inspector({
             <span>Device frame</span>
             <span className="section-label__hint">Screenshot</span>
           </div>
-          <label className="field-label" htmlFor="device-frame">Preset</label>
-          <select
-            id="device-frame"
-            className="profile-select device-frame-select"
+          <DeviceFramePicker
             value={slide.deviceFrameId}
-            onChange={(event) => onUpdate({ deviceFrameId: event.target.value as DeviceFrameId })}
-          >
-            {deviceFramePresets.map((preset) => (
-              <option key={preset.id} value={preset.id}>
-                {preset.name} · {preset.description}
-              </option>
-            ))}
-          </select>
+            label="Device frame"
+            onChange={(deviceFrameId) => onUpdate(
+              { deviceFrameId },
+              `device-frame:${slide.id}:${deviceFrameId}`,
+            )}
+          />
+          <div className="device-status-control">
+            <label className="layer-visibility-toggle device-status-toggle" htmlFor="device-status-bar">
+              <span>Device status bar</span>
+              <input
+                id="device-status-bar"
+                type="checkbox"
+                checked={slide.showDeviceStatusBar}
+                disabled={isFramelessDevice}
+                onChange={(event) => onUpdate(
+                  { showDeviceStatusBar: event.target.checked },
+                  `device-status-bar:${slide.id}:toggle`,
+                )}
+                aria-label="Show device status bar"
+              />
+              <span className="switch" aria-hidden="true" />
+            </label>
+            <p className="device-status-hint">
+              {isFramelessDevice
+                ? 'Frameless presets always export the screenshot on its own.'
+                : `A fixed ${DEFAULT_DEVICE_STATUS_BAR_TIME} clock with signal, Wi-Fi, and battery keeps exports reproducible.`}
+            </p>
+          </div>
+          <span className="field-label" id="screenshot-fit-label">Screenshot fit</span>
+          <div className="screenshot-fit-options" role="group" aria-labelledby="screenshot-fit-label">
+            {screenshotFitOptions.map((option) => {
+              const active = slide.screenshotFit === option.id
+              return (
+                <button
+                  key={option.id}
+                  className={`screenshot-fit-option${active ? ' is-active' : ''}`}
+                  type="button"
+                  onClick={() => onUpdate(
+                    { screenshotFit: option.id },
+                    `screenshot-fit:${slide.id}:${option.id}`,
+                  )}
+                  aria-pressed={active}
+                >
+                  <strong>{option.label}</strong>
+                  <span>{option.description}</span>
+                </button>
+              )
+            })}
+          </div>
+          <p className="device-status-hint">
+            {slide.screenshot
+              ? `${slide.screenshotName ?? 'The capture'} is shown with ${describeScreenshotFit(slide.screenshotFit).toLowerCase()}.`
+              : 'Contain keeps the whole capture visible. Switch to cover to fill the frame and crop the edges.'}
+          </p>
         </section>
 
         <section className="inspector-section">

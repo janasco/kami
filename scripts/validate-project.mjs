@@ -4,6 +4,23 @@ import { resolve } from 'node:path'
 
 const file = resolve(process.cwd(), 'screenshot-studio.json')
 const errors = []
+/*
+ * Device frame IDs the editor can open, mirrored from src/lib/devicePresets.ts.
+ * This validator runs without the app, so the list is repeated here on purpose:
+ * it is an independent check of the tracked project file, not a second source
+ * of truth for the catalog.
+ */
+const DEVICE_FRAME_IDS = [
+  'iphone', 'iphone-se', 'iphone-island', 'iphone-island-max', 'ipad-mini', 'ipad-air',
+  'android', 'android-pixel', 'android-galaxy', 'android-tablet', 'none', 'canvas',
+  // Spellings from before the parametric catalog; the migration maps them on open.
+  'iphone-x', 'iphone-notch', 'iphone-11', 'ios-phone', 'iphone-se-2', 'iphone-se-3', 'se',
+  'iphone-14-pro', 'iphone-15-pro', 'dynamic-island', 'iphone-14-pro-max', 'iphone-15-pro-max',
+  'dynamic-island-max', 'ipad', 'ipad-mini-6', 'ipad-pro', 'ipad-air-11', 'android-generic',
+  'android-phone', 'google-android', 'pixel', 'pixel-8', 'galaxy', 'samsung', 'android-samsung',
+  'android-tablet-10', 'tablet', 'frameless', 'no-frame', 'plain', 'feature-graphic',
+  'feature-graphic-canvas',
+]
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const nonEmpty = (value) => typeof value === 'string' && value.trim().length > 0
 const finite = (value) => typeof value === 'number' && Number.isFinite(value)
@@ -50,7 +67,8 @@ if (Array.isArray(document?.slides)) document.slides.forEach((slide, index) => {
   if (!isRecord(slide)) return
   if (!nonEmpty(slide.canvasId) || !canvasIds.has(slide.canvasId)) errors.push(`$.slides[${index}].canvasId references a missing canvas`)
   if (!nonEmpty(slide.name) || !nonEmpty(slide.layoutId) || !nonEmpty(slide.themeId)) errors.push(`$.slides[${index}] is missing name, layoutId, or themeId`)
-  if (slide.deviceFrameId !== undefined && !['iphone', 'android', 'none'].includes(slide.deviceFrameId)) errors.push(`$.slides[${index}].deviceFrameId is unsupported`)
+  if (slide.deviceFrameId !== undefined && !DEVICE_FRAME_IDS.includes(slide.deviceFrameId)) errors.push(`$.slides[${index}].deviceFrameId is unsupported`)
+  if (slide.showDeviceStatusBar !== undefined && typeof slide.showDeviceStatusBar !== 'boolean') errors.push(`$.slides[${index}].showDeviceStatusBar must be a boolean`)
   frame(slide.frame, `$.slides[${index}].frame`)
   if (!Array.isArray(slide.layers)) { errors.push(`$.slides[${index}].layers must be an array`); return }
   const layerIds = new Set()

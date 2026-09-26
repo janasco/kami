@@ -28,6 +28,20 @@
 | `outputVariants` | Selections of canvas, locale, theme, and slide set. |
 | `exportProfiles` | Store-specific output formats and target dimensions. |
 
+## Device chrome
+
+Slides that use a framed device preset can draw a small status bar inside the screenshot aperture with a fixed `9:41` clock, cellular, Wi-Fi, and battery shapes. The shapes are local CSS/SVG, so no bitmap assets or network requests are involved and exports stay reproducible.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `deviceFrameId` | `"iphone" \| "iphone-se" \| "iphone-island" \| "iphone-island-max" \| "ipad-mini" \| "ipad-air" \| "android" \| "android-pixel" \| "android-galaxy" \| "android-tablet" \| "none" \| "canvas"` | Preset that wraps the screenshot. Each preset carries its own display resolution, bezel, corner radii, cutout, and safe area. |
+| `showDeviceStatusBar` | `boolean` | Optional per slide. Defaults to `true` for framed presets and `false` for frameless presets. |
+| `screenshotFit` | `"contain" \| "cover"` | Optional per slide. How the capture fills the aperture. |
+
+Frameless presets never render the chrome, even when the flag is `true`, so a shared project file can keep the preference while switching presets.
+
+Older spellings such as `"iphone-x"`, `"android-generic"`, and `"feature-graphic"` still open on the preset they meant. Opening a project rewrites them to the current IDs, which does not change the document `version`.
+
 ## Coordinate model
 
 Kami uses one global pixel coordinate space for a scene. Slides and layers use frames with a top-left origin:
@@ -50,6 +64,7 @@ In `connected` mode, adjacent slide frames form one panoramic composition. In `i
 - Every slide references an existing canvas, layout, and theme.
 - Every output variant slide belongs to its canvas.
 - All frames contain finite numbers and positive dimensions.
+- Optional device fields such as `showDeviceStatusBar` may be absent; migrations supply deterministic defaults.
 - Export profiles reference output variants rather than duplicating slide content.
 - Unknown fields are preserved on read for forward compatibility, but do not override known-version semantics.
 

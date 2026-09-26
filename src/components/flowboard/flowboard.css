@@ -1,0 +1,2605 @@
+/*
+ * Flowboard editor shell styles.
+ *
+ * Loaded only by Flowboard.tsx so the classic editor keeps the original
+ * three-pane layout untouched. The shell is two zones: a full-width main area
+ * for the stage content and the canvas, and one rail. The rail is a permanent
+ * right column on a desktop, a dismissible bottom sheet on a tablet, and a
+ * dismissible side sheet on a phone, where a compact stage selector above the
+ * content keeps the current stage in view. There is no left navigation column.
+ *
+ * Every track is written out. The body grid is an explicit template, the stage
+ * body columns come from --flow-stage-columns, and the rail is a fixed,
+ * scrollable column, so no region depends on how many children it happens to
+ * render and no empty hole can open up next to a panel.
+ *
+ * Two hosts are relaxed here. The classic editor asks for a 680px minimum
+ * height and hides page overflow, which clipped the whole shell on short
+ * viewports, so the Flowboard reclaims the viewport.
+ *
+ * Type comes from the shared editor scale in styles.css, so this file names a
+ * step in that scale instead of a pixel value. Nothing here is set below 12px,
+ * body copy and controls sit at 13-14px, and the three heading steps above them
+ * are far enough apart to read as a hierarchy. Every grey is a level that clears
+ * 4.5:1 on the shell backgrounds.
+ */
+
+body:has(.flowboard-shell) #root {
+  min-width: 0;
+}
+
+/*
+ * Keep the shell exactly as tall as the viewport so its own scroll regions hold
+ * the overflow, and never taller: a 680px floor plus hidden page overflow made
+ * a short laptop window clip the stage nav and the rail.
+ */
+body:has(.flowboard-shell) .app-shell {
+  min-height: min(680px, 100%);
+}
+
+.flowboard-shell {
+  --flow-rail-width: 344px;
+  /* Type and contrast tokens. The three muted levels all clear 4.5:1 on the
+     white, #f5f5f8, and #f7f7fa surfaces used across the shell. */
+  --flow-text: #24232d;
+  --flow-text-strong: #45444f;
+  --flow-text-muted: #5f5e6a;
+  --flow-text-faint: #6b6a76;
+  --flow-focus: #4638b8;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: #f5f5f8;
+  color: var(--flow-text);
+  font-family: 'DM Sans', Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.flowboard-shell *,
+.flowboard-shell *::before,
+.flowboard-shell *::after {
+  box-sizing: border-box;
+}
+
+.flowboard-shell :focus-visible {
+  outline: 3px solid var(--flow-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * Cards, beats, and rail entries carry their own state ring, so they get an
+ * explicit focus ring too: a keyboard user must be able to see where they are
+ * even when the card already has a purple or dashed border.
+ */
+.flowboard-shell :is(
+  .flowboard-capture-card,
+  .flowboard-beat__select,
+  .flowboard-step,
+  .flowboard-rail__next,
+  .flowboard-rail__close,
+  .flowboard-card__mark
+):focus-visible {
+  outline: 3px solid var(--flow-focus);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px rgba(101, 88, 232, 0.24);
+}
+
+/*
+ * The shared Inspector, canvas, and stage components used to need a shell-scoped
+ * size override here, because their own rules ran at 7-9px. They no longer do:
+ * those classes now read the same editor scale as the rest of the shell, so
+ * there is one place to change a size rather than two that can disagree. What is
+ * left here is the one thing the scale cannot carry: these labels are secondary
+ * in the Inspector too, but inside the shell they read against the shell's own
+ * softer greys, so the colour is restated. Every selector is shell scoped, so
+ * the classic editor keeps its own look.
+ */
+.flowboard-shell :is(
+  .eyebrow,
+  .field-label,
+  .section-label__hint,
+  .property-row,
+  .locale-direction,
+  .preflight-footnote
+) {
+  color: var(--flow-text-muted, #5f5e6a);
+}
+
+/*
+ * Motion is decorative here: the card hovers, the sheet slide, and the rail
+ * transitions. Readers who ask for reduced motion get the same states without
+ * the movement.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .flowboard-shell *,
+  .flowboard-shell *::before,
+  .flowboard-shell *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .flowboard-rail-wrap {
+    transition: none;
+  }
+}
+
+.flowboard-shell .button {
+  min-height: var(--control-md);
+  padding: 8px 14px;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #4a4854;
+  font-size: var(--type-body);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.flowboard-shell .button--primary {
+  background: var(--purple, #6558e8);
+  color: #ffffff;
+}
+
+.flowboard-shell .button--primary:hover:not(:disabled) {
+  background: var(--purple-dark, #5548d6);
+}
+
+.flowboard-shell .button--outline {
+  border: 1px solid var(--line, #e5e4ea);
+  background: #ffffff;
+}
+
+.flowboard-shell .button--outline:hover:not(:disabled) {
+  border-color: #d5d3e2;
+  background: var(--purple-soft, #efedff);
+  color: var(--purple-dark, #5548d6);
+}
+
+.flowboard-shell .button--quiet {
+  background: transparent;
+  color: #6b6a76;
+}
+
+.flowboard-shell .button--quiet:hover:not(:disabled) {
+  background: var(--soft, #f7f7fa);
+  color: var(--ink, #24232d);
+}
+
+.flowboard-shell .button--small {
+  min-height: var(--control-sm);
+  padding: 5px 11px;
+  font-size: var(--type-secondary);
+}
+
+.flowboard-shell .button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.flowboard-shell .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-secondary);
+  cursor: pointer;
+}
+
+.flowboard-shell .icon-button:hover:not(:disabled) {
+  border-color: #d5d3e2;
+  background: var(--purple-soft, #efedff);
+  color: var(--purple-dark, #5548d6);
+}
+
+.flowboard-shell .icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.flowboard-shell .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--purple-dark, #5548d6);
+  font-size: var(--type-secondary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.flowboard-shell .text-button--compact {
+  width: auto;
+  padding: 4px 0 0;
+  font-size: var(--type-meta);
+  text-align: left;
+}
+
+.flowboard-shell .text-button:hover {
+  background: var(--purple-soft, #efedff);
+}
+
+.flowboard-shell .eyebrow {
+  display: block;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.flowboard-shell .field-label {
+  display: block;
+  margin: 14px 0 6px;
+  color: var(--flow-text-strong, #45444f);
+  font-size: var(--type-secondary);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.flowboard-shell input,
+.flowboard-shell select,
+.flowboard-shell textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 7px;
+  background: #ffffff;
+  color: inherit;
+  font: inherit;
+  font-size: var(--type-body);
+  line-height: var(--leading-snug);
+}
+
+/*
+ * A single-line control gets a real height so a 14px label is not clipped by a
+ * 30px box, and a multi-line one starts at two lines rather than one and a
+ * half. Both come from the shared scale, so a field is the same size in the
+ * shell, in the drawer, and in Guided mode.
+ */
+.flowboard-shell input,
+.flowboard-shell select {
+  min-height: var(--control-input);
+}
+
+.flowboard-shell textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.flowboard-shell .profile-select {
+  appearance: auto;
+}
+
+.flowboard-shell .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Manrope', sans-serif;
+  font-size: var(--type-title);
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.flowboard-shell .brand-mark {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #24232d;
+}
+
+.flowboard-shell .brand-mark i {
+  position: absolute;
+  width: 4px;
+  border-radius: 3px;
+  background: #a89cff;
+  transform: rotate(33deg);
+}
+
+.flowboard-shell .brand-mark i:nth-child(1) {
+  top: 8px;
+  left: 5px;
+  height: 11px;
+}
+
+.flowboard-shell .brand-mark i:nth-child(2) {
+  top: 7px;
+  left: 11px;
+  height: 12px;
+}
+
+.flowboard-shell .brand-mark i:nth-child(3) {
+  top: 9px;
+  left: 17px;
+  height: 9px;
+}
+
+.flowboard-shell .status-dot,
+.flowboard-shell .online-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b6b5c0;
+}
+
+.flowboard-shell .project-title__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  white-space: nowrap;
+}
+
+.flowboard-shell .project-title__status--saved .status-dot,
+.flowboard-shell .project-title__status--saving .status-dot {
+  background: #46a86f;
+}
+
+.flowboard-shell .project-title__status--error .status-dot,
+.flowboard-shell .project-title__status--open-error .status-dot {
+  background: var(--danger, #d95464);
+}
+
+/* Top bar */
+.flowboard-topbar {
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 64px;
+  min-height: 64px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line, #e5e4ea);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.flowboard-topbar .project-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.flowboard-topbar .project-title__label {
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.flowboard-topbar .project-title input {
+  width: 224px;
+  padding: 6px 9px;
+  font-size: var(--type-body-lg);
+  font-weight: 600;
+}
+
+.flowboard-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+}
+
+/* Two-zone body: the full-width main area, then the one rail */
+/*
+ * The row is explicitly bounded. With the default `auto` row the grid grew to
+ * the tallest zone, the rail overflowed its own `overflow: hidden` wrapper, and
+ * the part below the fold was unreachable.
+ *
+ * The main track is `minmax(0, 1fr)`, not a content width, so the stage panels
+ * and the canvas can shrink instead of forcing a horizontal scrollbar, and the
+ * rail is a fixed track that the main area gives up only when the viewport is
+ * too narrow to keep it. `flowboardBodyColumns` in the layout module owns the
+ * same decision for the tests.
+ */
+.flowboard-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--flow-rail-width);
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+
+/* The one rail: steps, deck context, and common actions */
+/*
+ * The wrap is the bounded column. It clips nothing of its own: the panel inside
+ * is the scroll region, so the part below the fold is always reachable instead
+ * of being cut off by a fixed-height column.
+ */
+.flowboard-rail-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--line, #e5e4ea);
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.flowboard-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  min-height: 0;
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.flowboard-rail__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.flowboard-rail__top .eyebrow {
+  color: var(--flow-text-faint, #6b6a76);
+}
+
+.flowboard-rail__close {
+  flex: 0 0 auto;
+}
+
+.flowboard-rail__label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.flowboard-rail__now {
+  padding: 12px 14px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 10px;
+  background: var(--soft, #f7f7fa);
+}
+
+.flowboard-rail__now .flowboard-rail__label {
+  margin-bottom: 4px;
+  color: var(--flow-text-strong, #45444f);
+}
+
+.flowboard-rail__now p {
+  margin: 0;
+  color: var(--flow-text-strong, #45444f);
+  font-size: var(--type-body);
+  line-height: var(--leading-normal);
+}
+
+.flowboard-rail__section {
+  display: flex;
+  flex-direction: column;
+}
+
+.flowboard-rail__section--status {
+  gap: 7px;
+}
+
+.flowboard-rail__notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--purple-soft, #efedff);
+  color: var(--purple-dark, #5548d6);
+  font-size: var(--type-body);
+  line-height: var(--leading-normal);
+}
+
+.flowboard-rail__meta {
+  margin: 0;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  line-height: var(--leading-normal);
+}
+
+.flowboard-rail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, #e5e4ea);
+}
+
+/*
+ * The mode switch travels with the rail, so it needs the shell's own colours and
+ * measurements rather than the guided shell's. It sits under the action row,
+ * which already draws the rule above this group.
+ */
+.flowboard-rail .editor-mode-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-left: 0;
+}
+
+.flowboard-rail .editor-mode-switch__label {
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.flowboard-rail .editor-mode-switch__options {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 999px;
+  background: var(--soft, #f7f7fa);
+}
+
+.flowboard-rail .editor-mode-switch__option {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--flow-text-strong, #45444f);
+  font-family: inherit;
+  font-size: var(--type-secondary);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.flowboard-rail .editor-mode-switch__option.is-active {
+  background: var(--purple, #6558e8);
+  color: #ffffff;
+}
+
+/* The stage list, in its two shapes */
+.flowboard-steps {
+  min-width: 0;
+}
+
+.flowboard-steps__heading {
+  padding: 0 2px 10px;
+}
+
+.flowboard-steps__heading strong {
+  display: block;
+  margin-top: 2px;
+  font-family: 'Manrope', sans-serif;
+  font-size: var(--type-title-sm);
+}
+
+.flowboard-steps__heading .eyebrow {
+  color: var(--flow-text-faint, #6b6a76);
+}
+
+.flowboard-steps__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowboard-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.flowboard-step:hover {
+  border-color: #dcd9f4;
+  background: var(--purple-soft, #efedff);
+}
+
+.flowboard-step.is-active {
+  border-color: var(--purple, #6558e8);
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(29, 27, 45, 0.05), 0 4px 12px rgba(29, 27, 45, 0.06);
+}
+
+.flowboard-step__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 6px;
+  background: #efeff3;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  font-weight: 700;
+}
+
+.flowboard-step.is-active .flowboard-step__index {
+  background: var(--purple, #6558e8);
+  color: #ffffff;
+}
+
+.flowboard-step__name {
+  min-width: 0;
+  font-size: var(--type-body);
+  font-weight: 700;
+}
+
+.flowboard-step__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #efeff3;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.flowboard-step__state i {
+  font-style: normal;
+}
+
+.flowboard-step__state--ready {
+  background: #e6f5ec;
+  color: #2a7a4c;
+}
+
+.flowboard-step__state--attention {
+  background: #fdeceb;
+  color: #b4463f;
+}
+
+/* Main stage area */
+
+.flowboard-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #f5f5f8;
+}
+
+/*
+ * The compact stage selector. It only appears where the rail is a sheet, so the
+ * main area can be full width and still say which stage is open. It scrolls
+ * sideways on its own rather than squeezing the stage content.
+ */
+.flowboard-stagebar {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line, #e5e4ea);
+  background: #ffffff;
+}
+
+.flowboard-steps--bar .flowboard-steps__list {
+  flex-direction: row;
+  gap: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.flowboard-steps--bar .flowboard-step {
+  width: auto;
+  min-width: max-content;
+  gap: 7px;
+  padding: 7px 12px;
+  background: var(--soft, #f7f7fa);
+}
+
+/* The long state word is dropped in the bar: the rail spells it out in full. */
+.flowboard-steps--bar .flowboard-step__state {
+  padding: 2px 6px;
+}
+
+.flowboard-steps--bar .flowboard-step__state-text {
+  display: none;
+}
+
+.flowboard-main__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.flowboard-stage-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid var(--line, #e5e4ea);
+  background: #ffffff;
+}
+
+.flowboard-stage-header__title {
+  min-width: 0;
+}
+
+.flowboard-stage-header h1 {
+  margin: 3px 0 4px;
+  font-family: 'Manrope', sans-serif;
+  font-size: var(--type-title-lg);
+  letter-spacing: -0.4px;
+}
+
+.flowboard-stage-header p {
+  margin: 0;
+  max-width: 62ch;
+  color: #6b6a76;
+  font-size: var(--type-body);
+  line-height: var(--leading-normal);
+}
+
+/* The rail toggle, only where the rail is a sheet. */
+.flowboard-rail-toggle {
+  display: none;
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.flowboard-stage-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--line, #e5e4ea);
+  background: #ffffff;
+}
+
+.flowboard-stage-nav__label {
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+}
+
+/* Stage panels */
+/*
+ * Every stage declares its own column template through --flow-stage-columns,
+ * which the shell writes from `flowboardStageLayout`. The one-column stages
+ * therefore never reserve a second track for a side panel that does not exist,
+ * and the narrow breakpoints below still collapse to a single column.
+ */
+.flowboard-stage-body {
+  display: grid;
+  grid-template-columns: var(--flow-stage-columns, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+  padding: 18px 24px 28px;
+}
+
+/* Fields that sit side by side inside one full-width panel. */
+.flowboard-field-grid,
+.flowboard-export-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px 20px;
+  align-items: start;
+}
+
+/* A field that needs the whole row, such as the three-up screenshot fit. */
+.flowboard-field--wide {
+  grid-column: 1 / -1;
+}
+
+.flowboard-export-grid {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.flowboard-export-grid__form {
+  min-width: 0;
+}
+
+.flowboard-panel {
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(29, 27, 45, 0.04), 0 4px 14px rgba(29, 27, 45, 0.04));
+}
+
+.flowboard-panel--wide {
+  grid-column: 1 / -1;
+}
+
+.flowboard-panel__heading {
+  margin-bottom: 12px;
+}
+
+.flowboard-panel__heading--row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.flowboard-panel__heading h3 {
+  margin: 3px 0 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: var(--type-title);
+  letter-spacing: -0.2px;
+}
+
+.flowboard-panel__heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.flowboard-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--purple-soft, #efedff);
+  color: var(--purple-dark, #5548d6);
+  font-size: var(--type-meta);
+  font-weight: 600;
+}
+
+.flowboard-hint {
+  margin: 10px 0 0;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-body);
+  line-height: var(--leading-normal);
+}
+
+.flowboard-wide-action {
+  width: 100%;
+  margin-top: 12px;
+  justify-content: center;
+}
+
+.flowboard-field {
+  margin-top: 4px;
+}
+
+.flowboard-panel .layer-visibility-toggle {
+  min-height: var(--control-lg);
+  font-size: var(--type-secondary);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.flowboard-panel .image-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 8px;
+  background: #fbfbfc;
+}
+
+.flowboard-panel .image-field__name {
+  display: block;
+  overflow: hidden;
+  color: var(--flow-text-strong, #45444f);
+  font-size: var(--type-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flowboard-field .field-label {
+  margin-top: 14px;
+}
+
+.flowboard-starter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.flowboard-record {
+  margin-top: 14px;
+  border-top: 1px solid var(--line, #e5e4ea);
+}
+
+.flowboard-record__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--row-min);
+  padding: 9px 0;
+  border-bottom: 1px solid #f0f0f4;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-body);
+}
+
+.flowboard-record__row strong {
+  color: #3b3a45;
+  font-size: var(--type-body);
+  text-align: right;
+}
+
+.flowboard-record__status--ready {
+  color: #2a7a4c;
+}
+
+.flowboard-record__status--warnings {
+  color: #a06a1c;
+}
+
+.flowboard-record__status--blocked {
+  color: #b4463f;
+}
+
+.flowboard-record .property-good {
+  color: #2a7a4c;
+}
+
+/* Intake */
+.flowboard-dropzone__target {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 20px;
+  border: 1.5px dashed #d5d2ee;
+  border-radius: 12px;
+  background: linear-gradient(140deg, #faf9ff, #f5f4fd);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.flowboard-dropzone__target.is-dragging {
+  border-color: var(--purple, #6558e8);
+  background: var(--purple-soft, #efedff);
+}
+
+.flowboard-dropzone__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--purple, #6558e8);
+  font-size: 18px;
+  box-shadow: 0 1px 2px rgba(29, 27, 45, 0.06);
+}
+
+.flowboard-dropzone__target h3 {
+  margin: 0 0 4px;
+  font-family: 'Manrope', sans-serif;
+  font-size: var(--type-title-sm);
+}
+
+.flowboard-dropzone__target p {
+  margin: 0;
+  color: #6b6a76;
+  font-size: var(--type-body);
+  line-height: var(--leading-normal);
+}
+
+.flowboard-dropzone__target code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #ecebf7;
+  font-size: var(--type-secondary);
+}
+
+.flowboard-dropzone__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.flowboard-template-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(184px, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowboard-template-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 10px;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flowboard-template-chip:hover:not(:disabled) {
+  border-color: #cdc9f2;
+  background: var(--purple-soft, #efedff);
+}
+
+.flowboard-template-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.flowboard-template-chip__category {
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.flowboard-template-chip strong {
+  font-size: var(--type-body);
+}
+
+.flowboard-template-chip small {
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.flowboard-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowboard-checklist__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 10px;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flowboard-checklist__item:hover {
+  border-color: #cdc9f2;
+  background: var(--purple-soft, #efedff);
+}
+
+.flowboard-checklist__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 50%;
+  background: #f0eff4;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+}
+
+.flowboard-checklist li.is-done .flowboard-checklist__mark {
+  background: #e6f5ec;
+  color: #2a7a4c;
+}
+
+.flowboard-checklist__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.flowboard-checklist__copy strong {
+  font-size: var(--type-body);
+}
+
+.flowboard-checklist__copy small {
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.flowboard-checklist__go {
+  color: var(--purple-dark, #5548d6);
+  font-size: var(--type-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+
+.flowboard-mini-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowboard-mini-strip__label {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Thumbnails */
+.flowboard-thumb {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.flowboard-thumb--slide {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  aspect-ratio: 1125 / 2436;
+  padding: 9px;
+}
+
+/*
+ * The miniature slide preview is the one place the shell draws its own chrome:
+ * its number and headline are the export's own text, so they are clamped and
+ * kept at the 12px floor rather than scaled down with the artwork.
+ */
+.flowboard-thumb__number {
+  font-size: var(--type-meta);
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.flowboard-thumb__title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-family: 'Manrope', sans-serif;
+  font-size: var(--type-meta);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.flowboard-thumb__device {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 46%;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.flowboard-thumb__device[data-framed='yes'] {
+  border: 1.5px solid rgba(255, 255, 255, 0.75);
+  border-radius: 8px;
+  background: rgba(12, 12, 20, 0.4);
+}
+
+.flowboard-thumb__device img {
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+.flowboard-thumb--capture {
+  width: 100%;
+  background: #f1f1f5;
+}
+
+.flowboard-thumb__aperture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 9 / 19.5;
+  max-height: 190px;
+  margin: 0 auto;
+  background: #ffffff;
+}
+
+.flowboard-thumb__aperture[data-framed='yes'] {
+  border: 3px solid #2c2b36;
+  border-radius: 14px;
+  background: #14141d;
+}
+
+.flowboard-thumb__aperture img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.flowboard-thumb__placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1.5px dashed #c9c8d2;
+  border-radius: 50%;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: 14px;
+}
+
+/* Frame stage */
+.flowboard-contact-sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowboard-capture-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 11px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 12px;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flowboard-capture-card:hover {
+  border-color: #cdc9f2;
+}
+
+/*
+ * Card states.
+ *
+ * Three structural states, not one background tint: the edited slide gets a
+ * solid ring, a corner pencil, and an Editing badge; the bulk selection gets a
+ * dashed ring, a corner tick, and a Selected badge; everything else stays
+ * plain. A range selection therefore reads as a range even though one of its
+ * slides is also the one being edited.
+ */
+.flowboard-capture-card.is-editing {
+  border-color: var(--purple, #6558e8);
+  border-width: 2px;
+  box-shadow: 0 0 0 3px rgba(101, 88, 232, 0.24);
+  background: #ffffff;
+}
+
+.flowboard-capture-card.is-selected:not(.is-editing) {
+  border-color: #8b7ff0;
+  border-style: dashed;
+  box-shadow: 0 0 0 2px rgba(101, 88, 232, 0.14);
+  background: #f7f5ff;
+}
+
+.flowboard-capture-card.is-editing.is-selected {
+  border-style: solid;
+  background: #ffffff;
+}
+
+.flowboard-capture-card.is-empty {
+  border-style: dashed;
+  background: #fbfbfd;
+}
+
+.flowboard-capture-card__index {
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  font-weight: 700;
+}
+
+.flowboard-capture-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.flowboard-capture-card__meta strong {
+  overflow: hidden;
+  font-size: var(--type-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flowboard-capture-card__meta span {
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.flowboard-capture-card__meta .is-good {
+  color: #1c7550;
+}
+
+.flowboard-capture-card__meta .is-muted {
+  color: var(--flow-text-faint, #6b6a76);
+}
+
+/* Story stage */
+.flowboard-beats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowboard-beat {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.flowboard-beats li.is-editing .flowboard-beat {
+  border-color: var(--purple, #6558e8);
+  border-width: 2px;
+  box-shadow: 0 0 0 3px rgba(101, 88, 232, 0.22);
+  background: #ffffff;
+}
+
+.flowboard-beats li.is-selected:not(.is-editing) .flowboard-beat {
+  border-color: #8b7ff0;
+  border-style: dashed;
+  box-shadow: 0 0 0 2px rgba(101, 88, 232, 0.14);
+  background: #f7f5ff;
+}
+
+.flowboard-beats li.is-editing.is-selected .flowboard-beat {
+  border-style: solid;
+  background: #ffffff;
+}
+
+.flowboard-beat__select {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flowboard-beat__select .flowboard-thumb--slide {
+  width: 52px;
+  flex: 0 0 52px;
+  border: 1px solid var(--line, #e5e4ea);
+}
+
+.flowboard-beat__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.flowboard-beat__number {
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  font-weight: 700;
+}
+
+.flowboard-beat__headline {
+  font-family: 'Manrope', sans-serif;
+  font-size: var(--type-body-lg);
+  line-height: var(--leading-tight);
+}
+
+.flowboard-beat__headline em {
+  color: var(--flow-text-faint, #6b6a76);
+  font-weight: 500;
+}
+
+.flowboard-beat__supporting {
+  overflow: hidden;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flowboard-beat__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.flowboard-beat__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--soft, #f7f7fa);
+  color: #6b6a76;
+  font-size: var(--type-meta);
+  font-weight: 600;
+}
+
+.flowboard-beat__tag i {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+}
+
+.flowboard-beat__tag.is-warn {
+  background: #fdeceb;
+  color: #b4463f;
+}
+
+.flowboard-beat__actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 4px;
+}
+
+.flowboard-beats__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line, #e5e4ea);
+}
+
+/* Multi-selection and the bulk action bar */
+.flowboard-selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 12px 0 14px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line, #e5e4ea);
+  border-radius: 10px;
+  background: #fbfbfd;
+}
+
+.flowboard-selection__status {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--flow-text-strong, #45444f);
+  font-size: var(--type-secondary);
+  line-height: var(--leading-normal);
+}
+
+.flowboard-selection__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+  line-height: var(--leading-snug);
+}
+
+.flowboard-selection__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.flowboard-selection__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/*
+ * The hint keeps its own size and colour from `.flowboard-hint`; only the
+ * placement is the selection bar's business, so nothing is restated here.
+ */
+.flowboard-selection .flowboard-hint {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+/*
+ * Corner glyph. The empty box is the affordance; the pencil and the tick are
+ * the two states, so a glance tells editing and selection apart.
+ */
+.flowboard-card__mark {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #a9a8b8;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #ffffff;
+  font-size: var(--type-meta);
+  font-weight: 700;
+  line-height: 1;
+}
+
+[data-selection-state='editing'] .flowboard-card__mark {
+  border-color: var(--purple, #6558e8);
+  background: var(--purple, #6558e8);
+}
+
+[data-selection-state='selected'] .flowboard-card__mark {
+  border-color: #6b5ce0;
+  background: #6b5ce0;
+}
+
+/*
+ * The visible state label, so the state is not carried by colour alone. It sits
+ * in the card's own content flow rather than over the artwork, because a pill on
+ * top of a capture would hide the thing the author is framing.
+ */
+.flowboard-card__badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--purple, #6558e8);
+  color: #ffffff;
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: var(--leading-snug);
+}
+
+.flowboard-card__badge:empty {
+  display: none;
+}
+
+.flowboard-card__badge.is-selected {
+  background: #4b3fb8;
+}
+
+.flowboard-beat__flags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* On a beat the corner glyph sits on the thumbnail, clear of the copy block. */
+.flowboard-beat__select .flowboard-card__mark {
+  top: 4px;
+  right: auto;
+  left: 4px;
+}
+
+.flowboard-bulk {
+  border-color: #cdc9f2;
+  background: linear-gradient(180deg, #f7f5ff 0%, #ffffff 46%);
+}
+
+.flowboard-bulk__groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.flowboard-bulk__group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 11px 13px 13px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.flowboard-bulk__group .field-label {
+  margin: 8px 0 4px;
+}
+
+.flowboard-bulk__group .field-label:first-child {
+  margin-top: 0;
+}
+
+.flowboard-bulk__segmented {
+  display: flex;
+  gap: 4px;
+}
+
+.flowboard-bulk__option {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--control-sm);
+  padding: 6px 8px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--flow-text-strong, #45444f);
+  font-size: var(--type-secondary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.flowboard-bulk__option:hover:not(:disabled) {
+  border-color: #cdc9f2;
+  background: var(--purple-soft, #efedff);
+  color: var(--purple-dark, #5548d6);
+}
+
+.flowboard-bulk__option.is-active {
+  border-color: var(--purple, #6558e8);
+  background: var(--purple-soft, #efedff);
+  color: var(--purple-dark, #5548d6);
+}
+
+.flowboard-bulk__option:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.flowboard-bulk__group .layer-opacity-control {
+  margin-top: 4px;
+}
+
+.flowboard-bulk__group .layer-opacity-control__label .field-label {
+  margin: 8px 0 3px;
+}
+
+.flowboard-bulk__status {
+  margin: 13px 0 0;
+  padding-top: 11px;
+  border-top: 1px solid var(--line, #e5e4ea);
+  color: #6b6a76;
+  font-size: var(--type-meta);
+  font-weight: 600;
+}
+
+/* Story stage translation matrix */
+.flowboard-matrix {
+  display: flex;
+  flex-direction: column;
+}
+
+.flowboard-matrix__completion {
+  padding: 4px 10px;
+  border: 1px solid #f1d7b1;
+  border-radius: 999px;
+  background: #fff9ee;
+  color: #8a6420;
+  font-size: var(--type-meta);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.flowboard-matrix__completion.is-complete {
+  border-color: #bfe4d0;
+  background: #eefaf3;
+  color: #1c7550;
+}
+
+.flowboard-matrix__scroll {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.flowboard-matrix__table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--type-meta);
+}
+
+.flowboard-matrix__caption {
+  padding-bottom: 10px;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-secondary);
+  line-height: var(--leading-normal);
+  text-align: left;
+}
+
+.flowboard-matrix__corner {
+  width: 188px;
+  padding: 0 10px 8px 0;
+  border-bottom: 1px solid var(--line, #e5e4ea);
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  vertical-align: bottom;
+}
+
+.flowboard-matrix__locale {
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--line, #e5e4ea);
+  text-align: left;
+  vertical-align: bottom;
+}
+
+.flowboard-matrix__locale + .flowboard-matrix__locale {
+  border-left: 1px solid var(--line, #e5e4ea);
+}
+
+.flowboard-matrix__locale.is-active {
+  background: #f7f5ff;
+}
+
+.flowboard-matrix__locale-name {
+  display: block;
+  color: var(--ink, #24232d);
+  font-size: var(--type-secondary);
+}
+
+.flowboard-matrix__locale-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.flowboard-matrix__locale-meta .locale-direction__badge {
+  font-size: var(--type-meta);
+  min-width: 34px;
+}
+
+.flowboard-matrix__tag {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--soft, #f7f7fa);
+  color: #6b6a76;
+  font-size: var(--type-meta);
+  font-weight: 700;
+}
+
+.flowboard-matrix__tag.is-active {
+  background: var(--purple-soft, #efedff);
+  color: var(--purple-dark, #5548d6);
+}
+
+.flowboard-matrix__locale-button {
+  padding: 3px 5px;
+  font-size: var(--type-meta);
+}
+
+.flowboard-matrix__beat {
+  padding: 11px 10px 11px 0;
+  border-bottom: 1px solid var(--line, #e5e4ea);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.flowboard-matrix__beat-title {
+  display: block;
+  margin-top: 2px;
+  font-family: 'Manrope', sans-serif;
+  font-size: var(--type-secondary);
+  line-height: var(--leading-snug);
+}
+
+.flowboard-matrix__beat-title em {
+  color: var(--flow-text-faint, #6b6a76);
+  font-weight: 500;
+}
+
+.flowboard-matrix__beat-meta {
+  display: block;
+  margin-top: 3px;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  line-height: var(--leading-snug);
+}
+
+.flowboard-matrix__cell {
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--line, #e5e4ea);
+  border-left: 1px solid var(--line, #e5e4ea);
+  vertical-align: top;
+}
+
+.flowboard-matrix__beat + .flowboard-matrix__cell {
+  border-left: 0;
+}
+
+.flowboard-matrix__cell.is-missing {
+  background: #fffaf6;
+}
+
+.flowboard-matrix__cell.is-editing {
+  background: var(--purple-soft, #efedff);
+  box-shadow: inset 0 0 0 1px rgba(101, 88, 232, 0.28);
+}
+
+.flowboard-matrix__cell[data-direction='rtl'] {
+  text-align: right;
+}
+
+.flowboard-matrix__rtl {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 8px;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  line-height: var(--leading-snug);
+}
+
+.flowboard-matrix__rtl .locale-direction__badge {
+  flex: 0 0 auto;
+  font-size: var(--type-meta);
+  min-width: 32px;
+}
+
+.flowboard-matrix__fields {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowboard-matrix__field {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: baseline;
+  gap: 0 6px;
+  color: var(--flow-text-strong, #45444f);
+  font-size: var(--type-meta);
+  line-height: var(--leading-snug);
+}
+
+.flowboard-matrix__field i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: #eefaf3;
+  color: #1c7550;
+  font-size: var(--type-meta);
+  font-style: normal;
+  font-weight: 800;
+}
+
+.flowboard-matrix__field.is-missing i {
+  background: #fdeceb;
+  color: #b4463f;
+}
+
+.flowboard-matrix__field.is-optional i {
+  background: var(--soft, #f7f7fa);
+  color: var(--flow-text-faint, #6b6a76);
+}
+
+.flowboard-matrix__field.is-missing > span:not(.flowboard-matrix__field-note) {
+  color: #b4463f;
+  font-weight: 600;
+}
+
+.flowboard-matrix__field-note {
+  grid-column: 2;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+}
+
+.flowboard-matrix__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 9px;
+}
+
+.flowboard-matrix__editor {
+  display: grid;
+  gap: 8px;
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: 1px dashed #cdc9f2;
+}
+
+.flowboard-matrix__field-edit .field-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: var(--type-secondary);
+}
+
+.flowboard-matrix__field-edit textarea {
+  font-size: var(--type-body);
+}
+
+.flowboard-matrix .flowboard-hint {
+  margin-top: 10px;
+}
+
+/* Refine stage */
+/* The column template comes from --flow-stage-columns, so the canvas keeps the
+   wider track and the property tray never squeezes it. */
+.flowboard-refine__canvas {
+  display: flex;
+  flex-direction: column;
+}
+
+.flowboard-refine__stage {
+  display: flex;
+  flex: 1;
+  min-height: 520px;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 10px;
+}
+
+.flowboard-refine__stage .editor-workspace {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: #f3f3f7;
+}
+
+/* The shared canvas keeps its aspect ratio, so it scales down with the stage. */
+.flowboard-refine__stage .slide-canvas {
+  width: min(342px, 100%);
+}
+
+.flowboard-tray__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.flowboard-tray__row .layer-visibility-toggle {
+  flex: 0 0 auto;
+}
+
+.flowboard-tray__row .layer-opacity-control {
+  flex: 1 1 140px;
+  min-width: 120px;
+}
+
+.flowboard-tray__pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.flowboard-tray .layer-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 5px;
+  margin: 8px 0 0;
+}
+
+.flowboard-tray .layer-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #6b6a76;
+  font-size: var(--type-meta);
+  text-align: left;
+  cursor: pointer;
+}
+
+.flowboard-tray .layer-option.is-active {
+  border-color: var(--purple, #6558e8);
+  background: var(--purple-soft, #efedff);
+  color: var(--purple-dark, #5548d6);
+  font-weight: 600;
+}
+
+.flowboard-tray .layer-option.is-hidden {
+  opacity: 0.5;
+}
+
+.flowboard-tray .layer-option__icon {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 3px;
+  background: #c9c8d2;
+}
+
+.flowboard-tray .transform-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.flowboard-tray .transform-field .field-label {
+  margin-top: 0;
+}
+
+.flowboard-tray .transform-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.flowboard-tray .transform-input {
+  width: 100%;
+  padding: 7px 8px;
+  font-size: var(--type-body);
+}
+
+.flowboard-tray .transform-input-wrap > span {
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+}
+
+.flowboard-tray .layer-visibility-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--flow-text-strong, #45444f);
+  font-size: var(--type-secondary);
+}
+
+.flowboard-tray .layer-visibility-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.flowboard-tray .layer-visibility-toggle .switch {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: #d8d7e0;
+  transition: background 120ms ease;
+}
+
+.flowboard-tray .layer-visibility-toggle .switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 120ms ease;
+}
+
+.flowboard-tray .layer-visibility-toggle input:checked + .switch {
+  background: var(--purple, #6558e8);
+}
+
+.flowboard-tray .layer-visibility-toggle input:checked + .switch::after {
+  transform: translateX(14px);
+}
+
+.flowboard-tray .layer-visibility-toggle input:focus-visible + .switch {
+  outline: 3px solid rgba(101, 88, 232, 0.35);
+  outline-offset: 2px;
+}
+
+.flowboard-tray .layer-opacity-control__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.flowboard-tray .layer-opacity-control__label .field-label {
+  margin: 0;
+}
+
+.flowboard-tray .layer-opacity-control output {
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.flowboard-tray .layer-opacity-slider {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  accent-color: var(--purple, #6558e8);
+}
+
+.flowboard-tray .preflight-panel {
+  margin-top: 14px;
+  padding: 14px 15px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 10px;
+  background: var(--soft, #f7f7fa);
+}
+
+.flowboard-tray .preflight-panel--blocked {
+  border-color: #f3cfcd;
+  background: #fdf4f3;
+}
+
+.flowboard-tray .preflight-panel--warnings {
+  border-color: #f0dfbb;
+  background: #fdf8ee;
+}
+
+.flowboard-tray .preflight-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowboard-tray .preflight-issues li,
+.flowboard-ship-issues li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: var(--type-secondary);
+  color: #4a4854;
+}
+
+.flowboard-tray .preflight-issues small,
+.flowboard-ship-issues small {
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+}
+
+.flowboard-tray .preflight-ready {
+  margin: 8px 0 0;
+  color: #2a7a4c;
+  font-size: var(--type-secondary);
+}
+
+.flowboard-tray .section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--flow-text-strong, #45444f);
+  font-size: var(--type-body);
+  font-weight: 700;
+}
+
+.flowboard-tray .preflight-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--type-secondary);
+  font-weight: 700;
+}
+
+.flowboard-tray .preflight-status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--flow-text-faint, #6b6a76);
+}
+
+.flowboard-tray .preflight-status--ready i {
+  background: #46a86f;
+}
+
+.flowboard-tray .preflight-status--warnings i {
+  background: #d9a13a;
+}
+
+.flowboard-tray .preflight-status--blocked i {
+  background: var(--danger, #d95464);
+}
+
+/*
+ * Inspector drawer.
+ *
+ * The drawer used to be `overflow: hidden` with a max height and no flex
+ * context, so the Inspector's own `flex: 1` scroll region never got a bounded
+ * height and the bottom half of the panel was clipped with no way to reach it.
+ * A bounded flex column gives the panel a real scroll region instead.
+ */
+.flowboard-drawer {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 12px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.flowboard-drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 10px 18px;
+  border-bottom: 1px solid var(--line, #e5e4ea);
+  background: #fbfbfc;
+}
+
+.flowboard-drawer__panel {
+  display: flex;
+  flex-direction: column;
+  max-height: min(620px, 68vh);
+  overflow: hidden;
+}
+
+.flowboard-drawer__panel .inspector {
+  flex: 1;
+  min-height: 0;
+  border-left: 0;
+  overflow: hidden;
+}
+
+/* The scroll region is the Inspector's own, so it needs to be reachable. */
+.flowboard-drawer__panel .inspector__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Ship stage */
+.flowboard-review {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowboard-review li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.flowboard-review__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 50%;
+  background: #f0eff4;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  font-weight: 700;
+}
+
+.flowboard-review li.is-done .flowboard-review__mark {
+  background: #e6f5ec;
+  color: #2a7a4c;
+}
+
+.flowboard-review li.is-blocked .flowboard-review__mark {
+  background: #fdeceb;
+  color: #b4463f;
+}
+
+.flowboard-review li.is-warn .flowboard-review__mark {
+  background: #fdf3e0;
+  color: #a06a1c;
+}
+
+.flowboard-review__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.flowboard-review__copy strong {
+  font-size: var(--type-body);
+}
+
+.flowboard-review__copy small {
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.flowboard-ship-issues {
+  margin: 14px 0 0;
+  padding: 14px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 10px;
+  background: var(--soft, #f7f7fa);
+  list-style: none;
+}
+
+.flowboard-ship-issues li {
+  padding: 9px 0;
+  border-bottom: 1px solid #ececf1;
+}
+
+.flowboard-ship-issues li:last-child {
+  border-bottom: 0;
+}
+
+.flowboard-ship-issues li.is-blocking > span {
+  color: #b4463f;
+}
+
+/* The rail's own extras */
+/*
+ * The record block and the up-next jump are shared with the stage panels, so
+ * only the rail's spacing override lives here. The deck facts are the same
+ * rows the panels use; there is no second copy of them anywhere else.
+ */
+.flowboard-rail__section .flowboard-record {
+  margin-top: 0;
+}
+
+.flowboard-rail__next {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 10px;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flowboard-rail__next:hover {
+  border-color: #cdc9f2;
+  background: var(--purple-soft, #efedff);
+}
+
+.flowboard-rail__next strong {
+  font-size: var(--type-body-lg);
+}
+
+.flowboard-rail__next > span {
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.flowboard-rail__next-state {
+  margin-top: 5px;
+  font-size: var(--type-meta) !important;
+  font-weight: 700;
+}
+
+.flowboard-rail__next-state--attention {
+  color: #b4463f !important;
+}
+
+.flowboard-rail__next-state--ready {
+  color: #2a7a4c !important;
+}
+
+/*
+ * Narrow tablets: the stage bodies drop to one column. The value matches
+ * FLOWBOARD_STAGE_SINGLE_COLUMN_MAX_WIDTH, because a custom property cannot
+ * change the track count from inside a media query.
+ */
+@media (max-width: 1023px) {
+  .flowboard-stage-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/*
+ * Short windows. The top bar and the stage nav are fixed height, so on a very
+ * short viewport the middle region can be squeezed out. There the shell stops
+ * claiming the viewport and the page scrolls instead, so the stage nav is never
+ * cut off at the bottom.
+ */
+@media (max-height: 620px) {
+  body:has(.flowboard-shell) {
+    overflow: auto;
+  }
+
+  body:has(.flowboard-shell) .app-shell {
+    height: auto;
+    min-height: 100%;
+  }
+}
+
+/*
+ * Tablet: the rail becomes a dismissible bottom sheet and the main area keeps
+ * the full width. The limits match FLOWBOARD_TABLET_MAX_WIDTH in the breakpoint
+ * hook, and the region itself comes from `flowboardRailRegion`.
+ */
+@media (max-width: 1199px) {
+  .flowboard-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .flowboard-rail-toggle {
+    display: inline-flex;
+  }
+
+  .flowboard-rail-wrap {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    max-height: min(64vh, 540px);
+    border-top: 1px solid var(--line, #e5e4ea);
+    border-left: 0;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 30px rgba(29, 27, 45, 0.12);
+    transform: translateY(101%);
+    transition: transform 180ms ease;
+    visibility: hidden;
+  }
+
+  .flowboard-shell.is-rail-open .flowboard-rail-wrap {
+    transform: translateY(0);
+    visibility: visible;
+  }
+
+  /*
+   * A scrim under the sheet, so a tap outside dismisses it. It is not in the tab
+   * order: Escape and the panel's own close button are the keyboard paths, and a
+   * full-viewport focusable button would be a trap.
+   */
+  .flowboard-rail-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 29;
+    border: 0;
+    padding: 0;
+    background: rgba(29, 27, 45, 0.32);
+    cursor: pointer;
+  }
+}
+
+/* Mobile: single-column review surface */
+@media (max-width: 767px) {
+  /*
+   * The bar wraps into several rows here, so it must grow with its content
+   * instead of keeping a fixed 58px basis and spilling over the stage header.
+   */
+  .flowboard-topbar {
+    flex: 0 0 auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 8px 12px;
+  }
+
+  .flowboard-topbar .project-title {
+    order: 3;
+    width: 100%;
+  }
+
+  .flowboard-topbar .project-title input {
+    width: 100%;
+  }
+
+  .flowboard-topbar__actions {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+
+  /*
+   * The rail is a side sheet here rather than a bottom sheet: it slides in from
+   * the right edge, so the stage content and the canvas behind it keep the full
+   * width of the phone instead of being pushed or permanently squeezed.
+   */
+  .flowboard-rail-wrap {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    width: min(364px, 90vw);
+    max-height: none;
+    border-top: 0;
+    border-left: 1px solid var(--line, #e5e4ea);
+    border-radius: 0;
+    box-shadow: -8px 0 30px rgba(29, 27, 45, 0.16);
+    transform: translateX(101%);
+  }
+
+  .flowboard-shell.is-rail-open .flowboard-rail-wrap {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  .flowboard-stage-header {
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 14px 10px;
+  }
+
+  .flowboard-rail-toggle {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .flowboard-stage-body,
+  .flowboard-refine {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px 16px 22px;
+  }
+
+  .flowboard-refine__stage {
+    min-height: 360px;
+  }
+
+  .flowboard-contact-sheet {
+    grid-template-columns: repeat(auto-fill, minmax(144px, 1fr));
+  }
+
+  .flowboard-beat__select {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .flowboard-beat__select .flowboard-thumb--slide {
+    width: 100%;
+    flex: 0 0 auto;
+    max-width: 92px;
+  }
+
+  .flowboard-matrix__table {
+    min-width: 640px;
+  }
+
+  .flowboard-matrix__corner {
+    width: 144px;
+  }
+
+  .flowboard-stage-nav__label {
+    display: none;
+  }
+
+  .flowboard-drawer__panel {
+    max-height: min(620px, 82vh);
+  }
+}

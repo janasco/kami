@@ -1,3 +1,22 @@
+/**
+ * The device frame vocabulary lives with the parametric catalog, and is
+ * re-exported here so the slide model keeps one import for its own types.
+ */
+import type { DeviceFrameId } from './lib/devicePresets'
+
+export type {
+  DeviceBodySpec,
+  DeviceCutoutKind,
+  DeviceFamilyId,
+  DeviceFrameId,
+  DeviceFramePreset,
+  DeviceOrientation,
+  DeviceSafeAreaSpec,
+  DeviceScreenClass,
+  DeviceScreenSpec,
+  DeviceStatusBarSpec,
+} from './lib/devicePresets'
+
 export type LayoutId =
   | 'hero'
   | 'centered'
@@ -16,7 +35,12 @@ export type ExportProfileId =
   | 'google-play-tablet-7-portrait'
   | 'google-play-tablet-7-landscape'
   | 'google-play-feature-graphic'
-export type DeviceFrameId = 'iphone' | 'android' | 'none'
+/**
+ * How an imported capture fills the device aperture. `contain` keeps the whole
+ * capture visible inside the frame, `cover` fills the aperture and crops the
+ * overflow.
+ */
+export type ScreenshotFit = 'cover' | 'contain'
 export type LocaleId = 'en-US' | 'es-ES' | 'ar-SA'
 export type LayerId = 'background-image' | 'accent-shape' | 'screenshot' | 'app-icon' | 'headline' | 'supporting-text' | 'kicker' | 'footer'
 
@@ -91,12 +115,6 @@ export interface ExportProfile {
   }
 }
 
-export interface DeviceFramePreset {
-  id: DeviceFrameId
-  name: string
-  description: string
-}
-
 export interface Slide {
   id: string
   title: string
@@ -105,6 +123,18 @@ export interface Slide {
   layout: LayoutId
   theme: ThemeId
   deviceFrameId: DeviceFrameId
+  /**
+   * Draws a small status chrome (time, cellular, Wi-Fi, battery) inside the
+   * device aperture. Frameless presets never render it; restoring an older
+   * project derives the default from {@link Slide.deviceFrameId}.
+   */
+  showDeviceStatusBar: boolean
+  /**
+   * Fit policy applied to {@link Slide.screenshot} inside the device aperture.
+   * Restoring an older project without the field resolves to `contain` so an
+   * import is never cropped without the author asking for it.
+   */
+  screenshotFit: ScreenshotFit
   /** Legacy composition-wide transform retained for direct composition dragging. */
   transform: SlideTransform
   layerTransforms: LayerTransforms

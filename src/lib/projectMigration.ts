@@ -3,6 +3,9 @@ import {
   createDefaultLayerSettings,
   createDefaultLayerTransforms,
   DEFAULT_DEVICE_FRAME_ID,
+  DEFAULT_SCREENSHOT_FIT,
+  defaultShowDeviceStatusBar,
+  resolveDeviceFrameId,
   DEFAULT_SLIDE_TRANSFORM,
 } from '../data'
 import { validateProjectDocument, validationSummary, type ValidationIssue } from './projectValidation'
@@ -56,6 +59,12 @@ const applyV1Defaults = (source: JsonRecord): JsonRecord => {
   if (Array.isArray(document.slides)) document.slides.forEach((slide) => {
     if (!isRecord(slide)) return
     if (slide.deviceFrameId === undefined) slide.deviceFrameId = DEFAULT_DEVICE_FRAME_ID
+    // Applied after the frame default so frameless projects stay frameless.
+    if (slide.showDeviceStatusBar === undefined) {
+      slide.showDeviceStatusBar = defaultShowDeviceStatusBar(resolveDeviceFrameId(slide.deviceFrameId))
+    }
+    // Imports must never be cropped without the author choosing it.
+    if (slide.screenshotFit === undefined) slide.screenshotFit = DEFAULT_SCREENSHOT_FIT
     if (slide.transform === undefined) slide.transform = defaultTransform()
     if (!Array.isArray(slide.layers)) return
     const defaults = createDefaultLayerTransforms()
@@ -96,6 +105,21 @@ const migrateKnownV1Ids = (source: JsonRecord): JsonRecord => {
   return document
 }
 
+/**
+ * Bring a pre-catalog device spelling up to the preset it meant. The document
+ * version is untouched: only the stored value changes, and a value that already
+ * names a current preset is left exactly as it is.
+ */
+const migrateLegacyDeviceFrames = (source: JsonRecord): JsonRecord => {
+  const document = clone(source)
+  if (Array.isArray(document.slides)) document.slides.forEach((slide) => {
+    if (!isRecord(slide) || slide.deviceFrameId === undefined) return
+    const resolved = resolveDeviceFrameId(slide.deviceFrameId)
+    if (resolved !== slide.deviceFrameId) slide.deviceFrameId = resolved
+  })
+  return document
+}
+
 export function migrateProjectDocument(value: unknown): MigrationResult {
   if (!isRecord(value)) {
     const issues = [{ path: '$', code: 'invalid-type', message: 'The project root must be a JSON object.', severity: 'error' as const }]
@@ -122,6 +146,9 @@ export function migrateProjectDocument(value: unknown): MigrationResult {
   const beforeKnownIds = JSON.stringify(document)
   document = migrateKnownV1Ids(document)
   if (JSON.stringify(document) !== beforeKnownIds) report.applied.push('v1: normalize legacy layout id')
+  const beforeDeviceIds = JSON.stringify(document)
+  document = migrateLegacyDeviceFrames(document)
+  if (JSON.stringify(document) !== beforeDeviceIds) report.applied.push('v1: normalize legacy device frame id')
   if (value.version === PROJECT_VERSION) report.applied.push('v1: apply optional field defaults')
 
   const validation = validateProjectDocument(document)

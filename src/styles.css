@@ -17,6 +17,62 @@
   --purple-soft: #efedff;
   --danger: #d95464;
   --shadow-sm: 0 1px 2px rgba(29, 27, 45, 0.04), 0 4px 14px rgba(29, 27, 45, 0.04);
+
+  /*
+   * Editor typography and control scale.
+   *
+   * One ramp for the editor chrome, so the sizes are declared once instead of
+   * being repeated as pixel literals in four stylesheets. The Guided shell, the
+   * Full Editor, the right rail, the stage panels, the Inspector and its
+   * drawer, the device picker, the translation matrix, the bulk action bar, and
+   * the canvas status chrome all read these names. `flowboard.css` and
+   * `guided.css` are loaded on top of this file and inherit the same tokens.
+   *
+   * The ladder is 12 / 13 / 14 / 15 / 16 / 18 / 22 / 28. The rules it encodes:
+   *
+   * - Nothing in the editor chrome is set below 12px. 12px is the floor for
+   *   metadata, counters, and status words, which are the smallest things an
+   *   author has to read.
+   * - Body copy and form controls sit at 13-14px, so a field the author types
+   *   into is the same size as the label that describes it.
+   * - Headings are three clear steps above the body (16 / 18 / 22) rather than
+   *   three shades of the same size, so a card title, a section title, and a
+   *   stage title read as a hierarchy at a glance.
+   *
+   * The exported slide design is deliberately not part of this layer. The
+   * artboard rules on `.slide-canvas`, `.device-status-bar`, and
+   * `.template-preview` size type against the 1242 x 2688 export, and they keep
+   * their own values: the complaint about readability is about the editor
+   * around the artboard, not the artwork inside it.
+   */
+  --type-meta: 12px;
+  --type-secondary: 13px;
+  --type-body: 14px;
+  --type-body-lg: 15px;
+  --type-title-sm: 16px;
+  --type-title: 18px;
+  --type-title-lg: 22px;
+  --type-display: 28px;
+
+  /*
+   * Line heights, paired with the step above so a two-line block keeps its
+   * rhythm. The old chrome ran 1.3-1.5 on 9-11px text, which is why multi-line
+   * help text and issue lists read as a grey block; the larger type gets a
+   * little more air instead of more lines.
+   */
+  --leading-tight: 1.25;
+  --leading-snug: 1.4;
+  --leading-normal: 1.55;
+
+  /*
+   * Control and row heights. Sized for the body step rather than under it, so a
+   * 14px label inside a 32px control still has a comfortable target.
+   */
+  --control-sm: 32px;
+  --control-md: 38px;
+  --control-lg: 44px;
+  --control-input: 38px;
+  --row-min: 40px;
 }
 
 * {
@@ -74,8 +130,8 @@ button:disabled {
   z-index: 10;
   display: flex;
   align-items: center;
-  flex: 0 0 68px;
-  height: 68px;
+  flex: 0 0 76px;
+  height: 76px;
   padding: 0 20px;
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.96);
@@ -87,7 +143,7 @@ button:disabled {
   gap: 10px;
   min-width: 132px;
   font-family: 'Manrope', sans-serif;
-  font-size: 19px;
+  font-size: var(--type-title-lg);
   font-weight: 800;
   letter-spacing: -0.5px;
 }
@@ -149,7 +205,7 @@ button:disabled {
 .project-title__label {
   grid-column: 1;
   color: var(--faint);
-  font-size: 10px;
+  font-size: var(--type-meta);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -159,12 +215,12 @@ button:disabled {
   grid-column: 2;
   grid-row: 1 / span 2;
   min-width: 0;
-  padding: 6px 7px;
+  padding: 7px 9px;
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
   font-family: 'Manrope', sans-serif;
-  font-size: 14px;
+  font-size: var(--type-body-lg);
   font-weight: 700;
 }
 
@@ -180,7 +236,7 @@ button:disabled {
   align-items: center;
   gap: 5px;
   color: #92919c;
-  font-size: 10px;
+  font-size: var(--type-meta);
   font-weight: 500;
 }
 
@@ -218,12 +274,12 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 36px;
-  padding: 0 14px;
+  min-height: var(--control-md);
+  padding: 0 16px;
   border: 1px solid transparent;
   border-radius: 9px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--type-body);
   font-weight: 700;
   transition: 150ms ease;
 }
@@ -259,9 +315,9 @@ button:disabled {
 }
 
 .button--small {
-  min-height: 31px;
-  padding-inline: 11px;
-  font-size: 11px;
+  min-height: var(--control-sm);
+  padding-inline: 13px;
+  font-size: var(--type-secondary);
 }
 
 .canvas-mode-toggle {
@@ -275,13 +331,13 @@ button:disabled {
 }
 
 .canvas-mode-toggle button {
-  min-height: 25px;
-  padding: 0 8px;
+  min-height: var(--control-sm);
+  padding: 0 10px;
   border-radius: 5px;
   background: transparent;
   color: #85848f;
   cursor: pointer;
-  font-size: 9px;
+  font-size: var(--type-meta);
   font-weight: 700;
   transition: 140ms ease;
 }
@@ -301,14 +357,14 @@ button:disabled {
 }
 
 .canvas-mode-toggle--canvas button {
-  min-height: 24px;
-  padding-inline: 7px;
+  min-height: var(--control-sm);
+  padding-inline: 9px;
 }
 
 /* Main editor columns */
 .editor-grid {
   display: grid;
-  grid-template-columns: 224px minmax(500px, 1fr) 304px;
+  grid-template-columns: 248px minmax(520px, 1fr) 336px;
   min-height: 0;
   flex: 1;
 }
@@ -334,22 +390,22 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 78px;
-  padding: 16px 17px 14px 19px;
+  min-height: 86px;
+  padding: 18px 18px 16px 20px;
   border-bottom: 1px solid var(--line);
 }
 
 .panel-heading h2 {
   margin: 2px 0 0;
   font-family: 'Manrope', sans-serif;
-  font-size: 16px;
+  font-size: var(--type-title);
   letter-spacing: -0.3px;
 }
 
 .eyebrow {
   display: block;
   color: #9a99a4;
-  font-size: 9px;
+  font-size: var(--type-meta);
   font-weight: 700;
   letter-spacing: 0.13em;
   text-transform: uppercase;
@@ -359,14 +415,14 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 31px;
-  height: 31px;
+  width: 34px;
+  height: 34px;
   border: 1px solid #dad9e2;
   border-radius: 8px;
   background: #fff;
   color: #4f4e59;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 500;
   transition: 150ms ease;
 }
@@ -378,10 +434,10 @@ button:disabled {
 }
 
 .icon-button--quiet {
-  width: 29px;
+  width: 32px;
   border: 0;
   color: #8a8994;
-  font-size: 12px;
+  font-size: var(--type-secondary);
   letter-spacing: 1px;
 }
 
@@ -390,7 +446,7 @@ button:disabled {
   min-height: 0;
   flex: 1;
   overflow: auto;
-  padding: 15px 13px;
+  padding: 16px 14px;
   scrollbar-width: thin;
   scrollbar-color: #dddce4 transparent;
 }
@@ -400,8 +456,8 @@ button:disabled {
   display: flex;
   align-items: center;
   width: 100%;
-  margin-bottom: 11px;
-  padding: 7px 7px 7px 6px;
+  margin-bottom: 12px;
+  padding: 9px 8px 9px 7px;
   border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
@@ -421,9 +477,9 @@ button:disabled {
 }
 
 .slide-list-item__number {
-  width: 20px;
+  width: 22px;
   color: #9b9aa5;
-  font-size: 9px;
+  font-size: var(--type-meta);
   font-weight: 700;
 }
 
@@ -471,7 +527,7 @@ button:disabled {
 }
 
 .navigator-actions {
-  padding: 13px;
+  padding: 14px;
   border-top: 1px solid var(--line);
   background: #fcfcfd;
 }
@@ -488,13 +544,13 @@ button:disabled {
   align-items: center;
   gap: 7px;
   width: 100%;
-  min-height: 30px;
+  min-height: var(--control-sm);
   padding: 0 7px;
   border-radius: 6px;
   background: transparent;
   color: #6a6975;
   cursor: pointer;
-  font-size: 10px;
+  font-size: var(--type-secondary);
   font-weight: 600;
   text-align: left;
 }
@@ -513,7 +569,7 @@ button:disabled {
 .editor-workspace {
   position: relative;
   display: grid;
-  grid-template-rows: 48px minmax(0, 1fr) 31px;
+  grid-template-rows: 52px minmax(0, 1fr) 36px;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -527,11 +583,11 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px;
+  padding: 0 20px;
   border-bottom: 1px solid #e0e0e6;
   background: rgba(250, 250, 252, 0.92);
   color: #6e6d78;
-  font-size: 10px;
+  font-size: var(--type-secondary);
 }
 
 .canvas-toolbar__group {
@@ -542,7 +598,7 @@ button:disabled {
 
 .canvas-toolbar__group strong {
   color: #45444f;
-  font-size: 11px;
+  font-size: var(--type-body);
 }
 
 .format-dot {
@@ -557,12 +613,12 @@ button:disabled {
 }
 
 .canvas-tool {
-  padding: 5px 6px;
+  padding: 6px 8px;
   border-radius: 5px;
   background: transparent;
   color: #74737e;
   cursor: default;
-  font-size: 10px;
+  font-size: var(--type-secondary);
 }
 
 .toolbar-separator {
@@ -608,23 +664,23 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 22px;
+  height: 26px;
   padding: 0 2px;
   color: #8b8a95;
-  font-size: 9px;
+  font-size: var(--type-meta);
 }
 
 .connected-slide__caption span {
-  min-width: 18px;
+  min-width: 20px;
   color: #a3a2ac;
-  font-size: 8px;
+  font-size: var(--type-meta);
   font-weight: 700;
 }
 
 .connected-slide__caption strong {
-  max-width: 245px;
+  max-width: 252px;
   overflow: hidden;
-  font-size: 9px;
+  font-size: var(--type-secondary);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -908,86 +964,160 @@ button:disabled {
   top: 43.5%;
   left: 50%;
   width: 51%;
-  aspect-ratio: 0.52;
+  /* The device catalog sets the body ratio for the selected preset. */
+  aspect-ratio: var(--device-body-ratio, 0.52);
   transform: translate(calc(-50% + var(--layer-transform-x)), var(--layer-transform-y)) rotate(var(--layer-transform-rotation)) scale(var(--layer-transform-scale-x), var(--layer-transform-scale-y)) scaleX(var(--layer-transform-flip-x)) scaleY(var(--layer-transform-flip-y));
 }
 
+/*
+ * The body is a rounded rectangle whose bezel, radii, and colors all come from
+ * the device catalog as style variables. Nothing here is a per-device rule, so
+ * a new preset needs no stylesheet change.
+ */
 .phone {
   position: relative;
   z-index: 2;
   width: 100%;
   height: 100%;
-  padding: 2.8%;
+  padding: var(--device-bezel-top, 2.8%) var(--device-bezel-inline, 2.8%) var(--device-bezel-bottom, 2.8%);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 10cqw;
-  background: #101017;
-  box-shadow: 0 17px 30px rgba(10, 8, 25, 0.42), inset 0 0 0 1px #30303a;
-}
-
-.phone__speaker {
-  position: absolute;
-  z-index: 3;
-  top: 1.4%;
-  left: 50%;
-  width: 27%;
-  height: 2.6%;
-  min-height: 3px;
-  border-radius: 999px;
-  background: #0a0a0f;
-  transform: translateX(-50%);
+  border: 1px solid var(--device-body-border, rgba(255, 255, 255, 0.5));
+  border-radius: var(--device-body-radius, 10%);
+  background: var(--device-body-background, #101017);
+  box-shadow: var(--device-body-shadow, 0 17px 30px rgba(10, 8, 25, 0.42), inset 0 0 0 1px #30303a);
 }
 
 .phone__screen {
+  position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border-radius: 8.1cqw;
+  border-radius: var(--device-screen-radius, 8%);
   background: linear-gradient(155deg, #f5f3fc, #c8c2ed);
+  /* Container queries keep status chrome sized to the aperture, not the slide. */
+  container-type: size;
+  /* Backdrop revealed by a contained capture; the frame preset recolours it. */
+  --screenshot-backdrop: var(--device-screen-backdrop, #0c0c13);
 }
 
-.phone__screen img {
+/*
+ * The cutout drawn over the capture: one computed path in display coordinates,
+ * laid out from the same numbers the safe area uses. It is decorative, so it
+ * never takes pointer events and cannot block dragging the screenshot layer.
+ */
+.device-cutout {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  pointer-events: none;
 }
 
-.slide-canvas--device-android .phone {
-  border-color: #303038;
-  border-radius: 4cqw;
-  background: #202028;
-  box-shadow: 0 17px 30px rgba(10, 8, 25, 0.42), inset 0 0 0 1px #4a4a52;
+.device-cutout path {
+  fill: #05050a;
 }
 
-.slide-canvas--device-android .phone__speaker {
-  top: 1.7%;
-  width: 7%;
-  height: 7%;
-  min-height: 0;
-  border-radius: 50%;
-  background: #08080b;
-  box-shadow: inset 0 0 0 1px #3b3b43;
+/*
+ * The capture is placed in its own box so the safe area can inset it without
+ * moving the status chrome, which is positioned against the aperture.
+ */
+.phone__media {
+  position: absolute;
+  inset: 0;
+  padding: var(--screenshot-safe-top, 0%) var(--screenshot-safe-inline, 0%) 0;
+  overflow: hidden;
+  background: var(--screenshot-backdrop, transparent);
 }
 
-.slide-canvas--device-android .phone__screen {
-  border-radius: 2.8cqw;
+.phone__media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: var(--screenshot-object-fit, contain);
+  object-position: center;
 }
 
-.slide-canvas--device-none .phone {
-  border-color: transparent;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.slide-canvas--device-none .phone__speaker,
-.slide-canvas--device-none .phone-shadow {
+/*
+ * Frameless presets draw the capture on its own: no bezel, no hairline, no drop
+ * shadow, and a neutral letterbox instead of the dark one a frame reveals. All
+ * of it comes from the palette in the device catalog, so the only thing left
+ * here is the shadow a framed device casts on the slide.
+ */
+[data-device-frameless='true'] .phone-shadow {
   display: none;
 }
 
-.slide-canvas--device-none .phone__screen {
-  border-radius: 0;
+/*
+ * Status chrome sits in the device safe area above the screenshot content. It is
+ * decorative, so it never captures pointer events and cannot block dragging the
+ * screenshot layer.
+ */
+.device-status-bar {
+  position: absolute;
+  z-index: 2;
+  top: var(--device-status-bar-top, 3.2%);
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--device-status-bar-height, 3.4%);
+  padding: 0 var(--device-status-bar-padding, 8%);
+  direction: ltr;
+  color: #ffffff;
+  font-size: calc(4.1cqw * var(--device-status-bar-scale, 1));
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0.5cqw 1.1cqw rgba(9, 8, 18, 0.5);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.device-status-bar::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: 300%;
+  background: linear-gradient(to bottom, rgba(12, 11, 24, 0.32), rgba(12, 11, 24, 0));
+  pointer-events: none;
+}
+
+.device-status-bar__time {
+  font-variant-numeric: tabular-nums;
+}
+
+.device-status-bar__indicators {
+  display: flex;
+  align-items: center;
+  gap: 0.42em;
+}
+
+.device-status-icon {
+  display: block;
+  height: 1.1em;
+  fill: currentColor;
+}
+
+.device-status-icon--signal {
+  width: 1.15em;
+}
+
+.device-status-icon--wifi {
+  width: 1.2em;
+}
+
+.device-status-icon--battery {
+  width: 1.7em;
+}
+
+[data-device-frameless='true'] .device-status-bar {
+  display: none;
 }
 
 .device-placeholder {
@@ -1552,11 +1682,11 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px;
+  padding: 0 20px;
   border-top: 1px solid #e2e1e7;
   background: rgba(250, 250, 252, 0.92);
   color: #9a99a4;
-  font-size: 9px;
+  font-size: var(--type-meta);
 }
 
 .canvas-statusbar span {
@@ -1608,7 +1738,7 @@ button:disabled {
 }
 
 .inspector__heading {
-  min-height: 78px;
+  min-height: 86px;
 }
 
 .inspector__scroll {
@@ -1620,7 +1750,7 @@ button:disabled {
 }
 
 .inspector-section {
-  padding: 17px 19px 19px;
+  padding: 18px 20px 20px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -1628,39 +1758,39 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 15px;
+  margin-bottom: 14px;
   color: #3c3b46;
-  font-size: 11px;
+  font-size: var(--type-body);
   font-weight: 700;
 }
 
 .section-label__hint {
   color: #aaa9b3;
-  font-size: 9px;
+  font-size: var(--type-meta);
   font-weight: 500;
 }
 
 .field-label {
   display: block;
-  margin: 0 0 6px;
+  margin: 0 0 7px;
   color: #777681;
-  font-size: 9px;
+  font-size: var(--type-secondary);
   font-weight: 700;
 }
 
 .inspector textarea,
 .profile-select {
   width: 100%;
-  min-height: 54px;
+  min-height: 62px;
   resize: vertical;
-  padding: 9px 10px;
+  padding: 10px 12px;
   border: 1px solid #dfdee6;
   border-radius: 8px;
   background: #fbfbfc;
   color: #34333e;
-  font-size: 10px;
+  font-size: var(--type-body);
   font-weight: 500;
-  line-height: 1.4;
+  line-height: var(--leading-snug);
   transition: 140ms ease;
 }
 
@@ -1670,9 +1800,9 @@ button:disabled {
 }
 
 .profile-select {
-  min-height: 34px;
+  min-height: var(--control-input);
   margin-bottom: 5px;
-  padding-block: 7px;
+  padding-block: 9px;
   cursor: pointer;
 }
 
@@ -1692,9 +1822,9 @@ button:disabled {
 .field-meta {
   display: flex;
   justify-content: space-between;
-  margin: 5px 1px 13px;
+  margin: 6px 1px 14px;
   color: #aaa9b3;
-  font-size: 8px;
+  font-size: var(--type-meta);
 }
 
 .inspector-section--locale {
@@ -1710,20 +1840,20 @@ button:disabled {
   align-items: center;
   gap: 7px;
   color: #8a8994;
-  font-size: 8px;
-  line-height: 1.3;
+  font-size: var(--type-secondary);
+  line-height: var(--leading-snug);
 }
 
 .locale-direction__badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
-  padding: 3px 5px;
+  min-width: 32px;
+  padding: 3px 6px;
   border-radius: 4px;
   background: #eeecff;
   color: var(--purple-dark);
-  font-size: 8px;
+  font-size: var(--type-meta);
   font-weight: 800;
   letter-spacing: 0.06em;
 }
@@ -1737,27 +1867,27 @@ button:disabled {
   display: grid;
   gap: 3px;
   margin: 12px 0 2px;
-  padding: 9px 10px;
+  padding: 10px 12px;
   border: 1px solid #f1d7b1;
   border-radius: 8px;
   background: #fff9ee;
   color: #9a702d;
-  font-size: 8px;
-  line-height: 1.4;
+  font-size: var(--type-secondary);
+  line-height: var(--leading-snug);
 }
 
 .translation-status strong {
   color: #805b21;
-  font-size: 9px;
+  font-size: var(--type-secondary);
 }
 
 .image-field {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 44px;
-  margin-top: 14px;
-  padding: 7px 8px 7px 10px;
+  min-height: var(--control-lg);
+  margin-top: 16px;
+  padding: 9px 8px 9px 12px;
   border: 1px solid #e1e0e7;
   border-radius: 9px;
   background: #fafafd;
@@ -1775,41 +1905,41 @@ button:disabled {
 
 .image-field__name {
   display: block;
-  max-width: 160px;
+  max-width: 176px;
   overflow: hidden;
   color: #8c8b96;
-  font-size: 8px;
+  font-size: var(--type-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .text-button--compact {
   width: auto;
-  min-height: 22px;
+  min-height: 26px;
   padding: 0 4px;
-  font-size: 9px;
+  font-size: var(--type-meta);
 }
 
 .layer-picker {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 5px;
-  margin: 2px 0 10px;
+  gap: 6px;
+  margin: 2px 0 12px;
 }
 
 .layer-option {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
-  min-height: 29px;
-  padding: 4px 6px;
+  min-height: var(--control-sm);
+  padding: 5px 8px;
   border: 1px solid #e0dfe6;
   border-radius: 7px;
   background: #fff;
   color: #72717c;
   cursor: pointer;
-  font-size: 8px;
+  font-size: var(--type-meta);
   font-weight: 600;
   text-align: left;
 }
@@ -1908,17 +2038,17 @@ button:disabled {
   display: flex;
   align-items: baseline;
   gap: 5px;
-  margin-bottom: 9px;
-  padding: 6px 7px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
   border-radius: 6px;
   background: #f7f6fb;
   color: #9a99a4;
-  font-size: 7px;
+  font-size: var(--type-secondary);
 }
 
 .selected-layer-name strong {
   color: #514a91;
-  font-size: 8px;
+  font-size: var(--type-body);
 }
 
 .selected-layer-name span:last-child {
@@ -1938,16 +2068,16 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 40px;
-  padding: 7px 8px;
+  min-height: var(--control-lg);
+  padding: 8px 10px;
   border: 1px solid #dfdee6;
   border-radius: 8px;
   background: #fbfbfc;
   color: #696873;
   cursor: pointer;
-  font-size: 8px;
+  font-size: var(--type-secondary);
   font-weight: 700;
-  line-height: 1.2;
+  line-height: var(--leading-tight);
 }
 
 .layer-visibility-toggle:hover,
@@ -1970,9 +2100,9 @@ button:disabled {
 
 .switch {
   position: relative;
-  width: 28px;
-  height: 16px;
-  flex: 0 0 28px;
+  width: 32px;
+  height: 18px;
+  flex: 0 0 32px;
   border-radius: 999px;
   background: #c9c8d0;
   transition: 140ms ease;
@@ -1982,8 +2112,8 @@ button:disabled {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgba(36, 35, 45, 0.25);
@@ -1996,7 +2126,174 @@ button:disabled {
 }
 
 .layer-visibility-toggle input:checked + .switch::after {
-  transform: translateX(12px);
+  transform: translateX(14px);
+}
+
+.device-status-control {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.device-status-toggle:has(input:disabled) {
+  border-color: #e6e5ec;
+  background: #f6f5f8;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.device-status-hint {
+  margin: 0 1px;
+  color: #8a8994;
+  font-size: var(--type-secondary);
+  line-height: var(--leading-snug);
+}
+
+/*
+ * Device picker. One option per catalog preset, grouped by family, with a
+ * procedurally drawn thumbnail, the display ratio, and one line of copy. The
+ * grid stays two columns so the sidebar width does not change with the catalog.
+ */
+.device-picker {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.device-picker__list {
+  display: grid;
+  gap: 8px;
+}
+
+.device-picker__group {
+  display: grid;
+  gap: 4px;
+}
+
+.device-picker__group-label {
+  color: #9a99a5;
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.device-picker__options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.device-option {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #e0dfe6;
+  border-radius: 7px;
+  background: #fff;
+  color: #72717c;
+  cursor: pointer;
+  text-align: left;
+  transition: 140ms ease;
+}
+
+.device-frame-thumb {
+  display: block;
+  width: 30px;
+  height: 30px;
+}
+
+.device-option__text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.device-option__text strong {
+  overflow: hidden;
+  color: #4a4954;
+  font-size: var(--type-secondary);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-option__meta {
+  color: #8a8994;
+  font-size: var(--type-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.device-option__description {
+  overflow: hidden;
+  font-size: var(--type-meta);
+  line-height: var(--leading-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-option:hover,
+.device-option.is-active {
+  border-color: #9b92ed;
+  background: #f5f3ff;
+  color: #5047bb;
+}
+
+.device-option.is-active strong,
+.device-option.is-active .device-option__meta {
+  color: #5047bb;
+}
+
+.device-picker__more {
+  justify-self: start;
+}
+
+.screenshot-fit-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+
+.screenshot-fit-option {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid #e0dfe6;
+  border-radius: 7px;
+  background: #fff;
+  color: #72717c;
+  cursor: pointer;
+  text-align: left;
+  transition: 140ms ease;
+}
+
+.screenshot-fit-option strong {
+  color: #4a4954;
+  font-size: var(--type-secondary);
+  font-weight: 700;
+}
+
+.screenshot-fit-option span {
+  overflow: hidden;
+  font-size: var(--type-meta);
+  line-height: var(--leading-snug);
+  text-overflow: ellipsis;
+}
+
+.screenshot-fit-option:hover,
+.screenshot-fit-option.is-active {
+  border-color: #9b92ed;
+  background: #f5f3ff;
+  color: #5047bb;
+}
+
+.screenshot-fit-option.is-active strong {
+  color: #5047bb;
 }
 
 .layer-opacity-control {
@@ -2016,14 +2313,14 @@ button:disabled {
 
 .layer-opacity-control output {
   color: #777681;
-  font-size: 8px;
+  font-size: var(--type-meta);
   font-weight: 700;
 }
 
 .layer-opacity-slider {
   display: block;
   width: 100%;
-  height: 17px;
+  height: 20px;
   margin: 0;
   accent-color: var(--purple);
   cursor: pointer;
@@ -2031,7 +2328,7 @@ button:disabled {
 
 .shape-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-columns: minmax(0, 1fr) 46px;
   gap: 8px;
   align-items: end;
   margin-bottom: 13px;
@@ -2042,14 +2339,14 @@ button:disabled {
 }
 
 .shape-controls__select {
-  min-height: 32px;
+  min-height: var(--control-input);
   margin: 0;
-  font-size: 10px;
+  font-size: var(--type-body);
 }
 
 .shape-color-input {
-  width: 42px;
-  height: 32px;
+  width: 46px;
+  height: 38px;
   padding: 3px;
   border: 1px solid #dfdee6;
   border-radius: 8px;
@@ -2082,16 +2379,16 @@ button:disabled {
 .transform-flip-control {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: #595762;
-  font-size: 10px;
+  font-size: var(--type-secondary);
   font-weight: 600;
   cursor: pointer;
 }
 
 .transform-flip-control input {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   margin: 0;
   accent-color: var(--purple);
   cursor: pointer;
@@ -2107,13 +2404,13 @@ button:disabled {
 
 .transform-input {
   width: 100%;
-  min-height: 32px;
-  padding: 7px 24px 7px 9px;
+  min-height: var(--control-input);
+  padding: 8px 26px 8px 10px;
   border: 1px solid #dfdee6;
   border-radius: 8px;
   background: #fbfbfc;
   color: #34333e;
-  font-size: 10px;
+  font-size: var(--type-body);
   font-weight: 600;
   -moz-appearance: textfield;
 }
@@ -2129,7 +2426,7 @@ button:disabled {
   top: 50%;
   right: 9px;
   color: #a09faa;
-  font-size: 9px;
+  font-size: var(--type-meta);
   pointer-events: none;
   transform: translateY(-50%);
 }
@@ -2142,8 +2439,8 @@ button:disabled {
 
 .layout-options {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 7px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
 }
 
 .layout-option {
@@ -2151,16 +2448,16 @@ button:disabled {
   display: flex;
   align-items: center;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  min-height: 82px;
-  padding: 7px 3px 6px;
+  min-height: 96px;
+  padding: 10px 8px 10px;
   border: 1px solid #e0dfe6;
   border-radius: 8px;
   background: #fff;
   color: #6d6c77;
   cursor: pointer;
-  font-size: 8px;
+  font-size: var(--type-meta);
   font-weight: 600;
 }
 
@@ -2177,19 +2474,19 @@ button:disabled {
   flex-direction: column;
   gap: 2px;
   width: 100%;
-  line-height: 1.2;
+  line-height: var(--leading-tight);
 }
 
 .layout-option__copy strong {
   color: currentColor;
-  font-size: 8px;
+  font-size: var(--type-secondary);
 }
 
 .layout-option__copy small {
   display: -webkit-box;
   overflow: hidden;
   color: #9997a2;
-  font-size: 6.5px;
+  font-size: var(--type-meta);
   font-weight: 500;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -2201,7 +2498,7 @@ button:disabled {
   top: 3px;
   right: 4px;
   color: var(--purple);
-  font-size: 8px;
+  font-size: var(--type-secondary);
 }
 
 .layout-sketch {
@@ -2385,23 +2682,23 @@ button:disabled {
 .theme-options {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 7px;
+  gap: 8px;
 }
 
 .theme-option {
   position: relative;
   display: grid;
-  grid-template-columns: 22px 1fr;
+  grid-template-columns: 24px 1fr;
   align-items: center;
   gap: 7px;
-  min-height: 37px;
-  padding: 5px 7px;
+  min-height: var(--control-md);
+  padding: 7px 9px;
   border: 1px solid #e0dfe6;
   border-radius: 8px;
   background: #fff;
   color: #6c6b76;
   cursor: pointer;
-  font-size: 8px;
+  font-size: var(--type-secondary);
   font-weight: 600;
   text-align: left;
 }
@@ -2418,15 +2715,15 @@ button:disabled {
 
 .theme-swatch {
   display: block;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border: 1px solid rgba(30, 29, 40, 0.1);
   border-radius: 6px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
 }
 
 .preflight-panel {
-  padding: 16px 19px 15px;
+  padding: 18px 20px 17px;
   border-bottom: 1px solid var(--line);
   background: #f8fbf9;
 }
@@ -2444,7 +2741,7 @@ button:disabled {
   align-items: center;
   gap: 5px;
   color: #4b8d6d;
-  font-size: 8px;
+  font-size: var(--type-secondary);
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2469,8 +2766,8 @@ button:disabled {
 .preflight-footnote {
   margin: 0;
   color: #777681;
-  font-size: 8px;
-  line-height: 1.45;
+  font-size: var(--type-secondary);
+  line-height: var(--leading-normal);
 }
 
 .preflight-footnote {
@@ -2492,8 +2789,8 @@ button:disabled {
   padding-left: 9px;
   border-left: 2px solid #e0b35d;
   color: #6e5a35;
-  font-size: 8px;
-  line-height: 1.35;
+  font-size: var(--type-secondary);
+  line-height: var(--leading-snug);
 }
 
 .preflight-panel--blocked .preflight-issues li {
@@ -2503,7 +2800,7 @@ button:disabled {
 
 .preflight-issues small {
   color: #9a8e78;
-  font-size: 7px;
+  font-size: var(--type-meta);
   font-weight: 700;
 }
 
@@ -2520,14 +2817,14 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 27px;
+  min-height: var(--row-min);
   color: #8b8a95;
-  font-size: 9px;
+  font-size: var(--type-secondary);
 }
 
 .property-row strong {
   color: #595863;
-  font-size: 9px;
+  font-size: var(--type-secondary);
   font-weight: 600;
 }
 
@@ -3920,12 +4217,36 @@ button:disabled {
 }
 
 @media (max-width: 1180px) {
+  /*
+   * The narrow columns carry the same 12-14px type as the wide ones, so they
+   * are trimmed by a few pixels rather than by a step on the scale. Dropping
+   * back to the old 194px/280px tracks would have squeezed a 14px field label
+   * and a three-word device name into a column that cannot hold them.
+   */
   .editor-grid {
-    grid-template-columns: 194px minmax(460px, 1fr) 280px;
+    grid-template-columns: 216px minmax(480px, 1fr) 312px;
   }
 
   .top-toolbar__actions .button--history {
     display: none;
+  }
+
+  /*
+   * The classic toolbar carries twelve controls, and at the larger body step they
+   * no longer sit on one line beside the project field here. The buttons tighten
+   * up instead: a label that would wrap to a second line costs more vertical
+   * room in a 76px bar than the padding does.
+   */
+  .top-toolbar {
+    padding: 0 14px;
+  }
+
+  .top-toolbar__actions {
+    gap: 6px;
+  }
+
+  .top-toolbar .button {
+    padding-inline: 10px;
   }
 
   .project-title {

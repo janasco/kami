@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createSlide, exportProfiles, starterSlide } from './data'
 import { ExportSlides } from './components/ExportSlides'
+import { Flowboard, type FlowboardProps } from './components/Flowboard'
+import { GuidedShell } from './components/GuidedShell'
 import { Inspector } from './components/Inspector'
 import { SlideCanvas } from './components/SlideCanvas'
 import { SlideNavigator } from './components/SlideNavigator'
@@ -23,12 +25,22 @@ import {
 } from './lib/exportPreflight'
 import { createSlidesFromProjectTemplate, type ProjectTemplate } from './lib/projectTemplates'
 import { createDemoProject } from './lib/demoProject'
-import type { ScreenshotImportItem } from './lib/screenshotImport'
+import { applyBulkSlideAction, bulkActionMergeKey, describeBulkSlideResult, type BulkSlideAction } from './lib/flowboardBulkEdit'
+import {
+  readScreenshotFile,
+  validateScreenshotFiles,
+  type ScreenshotImportItem,
+} from './lib/screenshotImport'
 import { hasCompletedOnboarding, markOnboardingComplete } from './lib/onboarding'
+import { readEditorMode, resolveInitialEditorMode, writeEditorMode, type EditorMode } from './lib/editorMode'
+import { applySlideTextUpdateToSlides, type SlideTextField } from './lib/localization'
 import type { CanvasMode, ExportProfileId, LayerId, LocaleId, Slide, SlideTransform } from './types'
 
 const HISTORY_LIMIT = 50
 const TEXT_HISTORY_COALESCE_MS = 750
+
+/** UI-only view choice. The Flowboard is the Full Editor experience. */
+type EditorView = 'flowboard' | 'classic'
 
 interface EditorState {
   projectName: string
@@ -84,6 +96,20 @@ function App() {
   const [screenshotImportOpen, setScreenshotImportOpen] = useState(false)
   const [onboardingCompleted, setOnboardingCompleted] = useState(hasCompletedOnboarding)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const [editorView, setEditorView] = useState<EditorView>('flowboard')
+  /**
+   * Guided mode for a first-time author, Full editor for everyone else.
+   *
+   * The stored preference is read once and carried alongside the live mode, so
+   * the first-run default can be resolved when the local draft load finishes
+   * without ever overwriting a choice the author made. Until that lands the
+   * Full Editor renders, which is what a returning author expects to see first.
+   */
+  const [editorModeState, setEditorModeState] = useState<{ mode: EditorMode; stored: EditorMode | null }>(() => {
+    const stored = readEditorMode()
+    return { mode: stored ?? 'full', stored }
+  })
+  const { mode: editorMode } = editorModeState
   const exportInProgressRef = useRef(false)
   const exportStageRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -234,6 +260,13 @@ function App() {
           setPersistenceStatus('open-error')
           setPersistenceDetail(`The local browser draft was rejected: ${loadResult.error} The current editor state was not changed.`)
           setOnboardingOpen(!onboardingCompleted)
+          setEditorModeState((current) => ({
+            ...current,
+            mode: resolveInitialEditorMode(
+              { restoredProject: false, onboardingComplete: onboardingCompleted },
+              current.stored,
+            ),
+          }))
           return
         }
         const initialProject = loadResult.project
@@ -248,6 +281,15 @@ function App() {
           })
         }
         clearEditorHistory()
+        // The first-run default can only be decided now, once it is known
+        // whether a project was restored. An explicit stored choice is kept.
+        setEditorModeState((current) => ({
+          ...current,
+          mode: resolveInitialEditorMode(
+            { restoredProject: Boolean(initialProject), onboardingComplete: onboardingCompleted },
+            current.stored,
+          ),
+        }))
         setOnboardingOpen(!initialProject && !onboardingCompleted)
         setProjectLoadComplete(true)
         setPersistenceStatus('saving')
@@ -259,6 +301,13 @@ function App() {
         setPersistenceStatus('error')
         setPersistenceDetail('The local browser draft could not be loaded. Download screenshot-studio.json to keep the project.')
         setOnboardingOpen(!onboardingCompleted)
+        setEditorModeState((current) => ({
+          ...current,
+          mode: resolveInitialEditorMode(
+            { restoredProject: false, onboardingComplete: onboardingCompleted },
+            current.stored,
+          ),
+        }))
       })
 
     return () => {
@@ -361,38 +410,28 @@ function App() {
     }, mergeKey)
   }
 
-  const updateSelectedSlideText = (field: 'title' | 'subtitle', value: string) => {
+  /**
+   * Writes one text field for one slide and locale.
+   *
+   * The Inspector always edits the active slide in the active locale, and the
+   * Story translation matrix can edit any cell, so both share this one path. The
+   * merge key is what groups a burst of typing into a single undo step, and it
+   * is unchanged from before: `text:<slideId>:<locale>:<field>`.
+   */
+  const updateSlideText = (
+    slideId: string,
+    locale: LocaleId,
+    field: SlideTextField,
+    value: string,
+  ) => {
     commitEditorUpdate((current) => {
-      let changed = false
-      const nextSlides = current.slides.map((slide) => {
-        if (slide.id !== current.selectedId) return slide
-        if (current.activeLocale === 'en-US') {
-          if (slide[field] === value && slide.translations?.['en-US']?.[field] === value) return slide
-          changed = true
-          return {
-            ...slide,
-            [field]: value,
-            translations: {
-              ...slide.translations,
-              'en-US': { ...slide.translations?.['en-US'], [field]: value },
-            },
-          }
-        }
-        if (slide.translations?.[current.activeLocale]?.[field] === value) return slide
-        changed = true
-        return {
-          ...slide,
-          translations: {
-            ...slide.translations,
-            [current.activeLocale]: {
-              ...slide.translations?.[current.activeLocale],
-              [field]: value,
-            },
-          },
-        }
-      })
-      return changed ? { ...current, slides: nextSlides } : current
-    }, `text:${editorRef.current.selectedId}:${editorRef.current.activeLocale}:${field}`)
+      const nextSlides = applySlideTextUpdateToSlides(current.slides, slideId, locale, field, value)
+      return nextSlides === current.slides ? current : { ...current, slides: nextSlides }
+    }, `text:${slideId}:${locale}:${field}`)
+  }
+
+  const updateSelectedSlideText = (field: SlideTextField, value: string) => {
+    updateSlideText(editorRef.current.selectedId, editorRef.current.activeLocale, field, value)
   }
 
   const changeProjectName = (name: string) => {
@@ -418,6 +457,18 @@ function App() {
     commitEditorUpdate((current) => (
       current.exportProfileId === profileId ? current : { ...current, exportProfileId: profileId }
     ))
+  }
+
+  /**
+   * Switches between Guided and Full editor and remembers the choice.
+   *
+   * This is a browser preference only. Both shells drive the same editor
+   * state, history, autosave, and export path, so switching modes cannot
+   * change the deck and needs no project change.
+   */
+  const changeEditorMode = (mode: EditorMode) => {
+    setEditorModeState({ mode, stored: mode })
+    writeEditorMode(mode)
   }
 
   const closeOnboarding = () => {
@@ -552,6 +603,96 @@ function App() {
     })
   }
 
+  /** Reorders one slide inside the deck. Undoable like any other edit. */
+  const moveSlide = (id: string, direction: -1 | 1) => {
+    commitEditorUpdate((current) => {
+      const index = current.slides.findIndex((slide) => slide.id === id)
+      const targetIndex = index + direction
+      if (index < 0 || targetIndex < 0 || targetIndex >= current.slides.length) return current
+
+      const nextSlides = [...current.slides]
+      const [moved] = nextSlides.splice(index, 1)
+      nextSlides.splice(targetIndex, 0, moved)
+      return { ...current, slides: nextSlides }
+    })
+  }
+
+  /**
+   * Copies the selected slide's visual style onto every other slide. Only
+   * fields the project format already carries are touched, and the change goes
+   * through the same history and autosave path as every other edit.
+   */
+  const applySelectedSlideStyleToAllSlides = () => {
+    let appliedCount = 0
+    commitEditorUpdate((current) => {
+      const source = current.slides.find((slide) => slide.id === current.selectedId)
+      if (!source) return current
+
+      let changed = false
+      const nextSlides = current.slides.map((slide) => {
+        if (slide.id === source.id) return slide
+        if (
+          slide.layout === source.layout
+          && slide.theme === source.theme
+          && slide.deviceFrameId === source.deviceFrameId
+          && slide.showDeviceStatusBar === source.showDeviceStatusBar
+          && slide.screenshotFit === source.screenshotFit
+          && slide.accentShapeStyle.type === source.accentShapeStyle.type
+          && slide.accentShapeStyle.color.toLowerCase() === source.accentShapeStyle.color.toLowerCase()
+        ) return slide
+
+        changed = true
+        return {
+          ...slide,
+          layout: source.layout,
+          theme: source.theme,
+          deviceFrameId: source.deviceFrameId,
+          showDeviceStatusBar: source.showDeviceStatusBar,
+          screenshotFit: source.screenshotFit,
+          accentShapeStyle: { ...source.accentShapeStyle },
+        }
+      })
+
+      if (!changed) return current
+      appliedCount = nextSlides.length - 1
+      return { ...current, slides: nextSlides }
+    })
+
+    if (appliedCount > 0) {
+      setProjectValidationNotice(`The selected slide style was applied to ${appliedCount} other slide${appliedCount === 1 ? '' : 's'}. Undo is available.`)
+    }
+  }
+
+  /**
+   * Applies one bulk change to several slides as a single history entry, so
+   * undo, redo, and autosave behave exactly like a single-slide edit. Returns
+   * the notice to show in the stage, or null when no slide held a different
+   * value.
+   */
+  const applyBulkSlideActionToSlides = (slideIds: string[], action: BulkSlideAction) => {
+    if (slideIds.length === 0) return null
+    const targets = new Set(slideIds)
+    let changedCount = 0
+
+    commitEditorUpdate((current) => {
+      changedCount = 0
+      const nextSlides = current.slides.map((slide) => {
+        if (!targets.has(slide.id)) return slide
+        const next = applyBulkSlideAction(slide, action)
+        if (!next) return slide
+        changedCount += 1
+        return next
+      })
+
+      return changedCount === 0 ? current : { ...current, slides: nextSlides }
+    }, bulkActionMergeKey(action, slideIds))
+
+    if (changedCount === 0) return null
+    const notice = describeBulkSlideResult(action, changedCount)
+    setProjectValidationNotice(notice)
+    return notice
+  }
+
   const importScreenshot = (file: File, targetId = selectedSlide.id) => {
     if (!file.type.startsWith('image/')) return
     const reader = new FileReader()
@@ -617,6 +758,25 @@ function App() {
     setProjectValidationNotice(
       `${items.length} screenshot${items.length === 1 ? '' : 's'} imported in order. ${createdCount > 0 ? `${createdCount} slide${createdCount === 1 ? '' : 's'} added. ` : ''}${initialSlideCount > items.length ? 'Existing images on later slides were left untouched. ' : ''}Undo is available.`,
     )
+  }
+
+  /** Reads dropped or picked image files and imports them in selection order. */
+  const importScreenshotFiles = (files: File[]) => {
+    const accepted = validateScreenshotFiles(files)
+      .filter((candidate) => candidate.valid)
+      .map((candidate) => candidate.file)
+    if (accepted.length === 0) {
+      setPersistenceStatus('error')
+      setPersistenceDetail('None of the selected files were a PNG, JPG, or WebP image under 10 MB. Nothing changed.')
+      return
+    }
+
+    void Promise.all(accepted.map((file) => readScreenshotFile(file)))
+      .then((items) => importScreenshotSequence(items))
+      .catch(() => {
+        setPersistenceStatus('error')
+        setPersistenceDetail('One or more dropped images could not be read. The current project was not changed.')
+      })
   }
 
   const importAppIcon = (file: File, targetId = selectedSlide.id) => {
@@ -816,84 +976,161 @@ function App() {
     }
   }
 
+  /**
+   * One prop object for both shells.
+   *
+   * Guided mode is a different set of questions asked of the same editor, not
+   * a second editor, so it is handed the identical state and handlers. The
+   * export, import, autosave, and project logic below is therefore written once
+   * and used by both.
+   */
+  const shellProps: FlowboardProps = {
+    projectName,
+    onProjectNameChange: changeProjectName,
+    canUndo,
+    canRedo,
+    onUndo: undo,
+    onRedo: redo,
+    onSaveProject: saveProject,
+    onOpenProject: () => projectInputRef.current?.click(),
+    onOpenProjectFile: (file) => void openProjectFile(file),
+    slides,
+    selectedSlide,
+    selectedIndex,
+    onSelect: selectSlide,
+    onAddSlide: addSlide,
+    onDuplicateSlide: duplicateSlide,
+    onDeleteSlide: deleteSlide,
+    onMoveSlide: moveSlide,
+    onApplyStyleToAllSlides: applySelectedSlideStyleToAllSlides,
+    onUpdateSlide: updateSelectedSlide,
+    onApplyBulkSlideAction: applyBulkSlideActionToSlides,
+    onTextUpdate: updateSelectedSlideText,
+    onSlideTextUpdate: updateSlideText,
+    onTransformChange: updateSlidePosition,
+    selectedLayerId,
+    onLayerSelect: setSelectedLayerId,
+    onLayerTransformChange: updateLayerPosition,
+    onImportScreenshot: openImport,
+    onImportFiles: importScreenshotFiles,
+    onOpenScreenshotImport: () => setScreenshotImportOpen(true),
+    onImportAppIcon: () => openAppIconImport(),
+    onRemoveAppIcon: removeAppIcon,
+    onImportBackground: () => openBackgroundImageImport(),
+    onRemoveBackground: removeBackgroundImage,
+    onOpenTemplates: () => setTemplatePickerOpen(true),
+    templatesDisabled: !projectLoadComplete && !projectLoadFailed,
+    onApplyTemplate: applyProjectTemplate,
+    onLoadDemo: loadDemoProject,
+    onStartBlank: startBlankSlide,
+    onOpenGuide: () => setOnboardingOpen(true),
+    activeLocale,
+    onLocaleChange: changeActiveLocale,
+    canvasMode,
+    onCanvasModeChange: changeCanvasMode,
+    profile: exportProfile,
+    onProfileChange: changeExportProfile,
+    preflight,
+    onExport: () => void exportProject(),
+    exportStatus,
+    exportDetail,
+    exportCompleted,
+    exportTotal,
+    persistenceStatus,
+    persistenceDetail,
+    projectValidationNotice,
+    onShowClassicEditor: () => setEditorView('classic'),
+    onEditorModeChange: changeEditorMode,
+  }
+
   return (
     <div className="app-shell">
-      <TopToolbar
-        projectName={projectName}
-        onProjectNameChange={changeProjectName}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        onUndo={undo}
-        onRedo={redo}
-        onTemplates={() => setTemplatePickerOpen(true)}
-        templatesDisabled={!projectLoadComplete && !projectLoadFailed}
-        onOpenGuide={() => setOnboardingOpen(true)}
-        onImport={() => openImport()}
-        onImportMultiple={() => setScreenshotImportOpen(true)}
-        onOpen={() => projectInputRef.current?.click()}
-        onSave={saveProject}
-        onExport={() => void exportProject()}
-        exportStatus={exportStatus}
-        exportDetail={exportDetail}
-        exportCompleted={exportCompleted}
-        exportTotal={exportTotal}
-        canvasMode={canvasMode}
-        onCanvasModeChange={changeCanvasMode}
-        persistenceStatus={persistenceStatus}
-        persistenceDetail={persistenceDetail}
-        profile={exportProfile}
-      />
-      <div className="editor-grid">
-        <SlideNavigator
-          slides={slides}
-          selectedId={selectedSlide.id}
-          onSelect={selectSlide}
-          onAdd={addSlide}
-          onDuplicate={duplicateSlide}
-          onDelete={deleteSlide}
-        />
-        <SlideCanvas
-          slides={slides}
-          selectedSlide={selectedSlide}
-          selectedIndex={selectedIndex}
-          selectedId={selectedSlide.id}
-          mode={canvasMode}
-          onModeChange={changeCanvasMode}
-          onSelect={selectSlide}
-          onImport={openImport}
-          onTransformChange={updateSlidePosition}
-          selectedLayerId={selectedLayerId}
-          onLayerSelect={setSelectedLayerId}
-          onLayerTransformChange={updateLayerPosition}
-          persistenceStatus={persistenceStatus}
-          persistenceDetail={persistenceDetail}
-          projectValidationNotice={projectValidationNotice}
-          exportStatus={exportStatus}
-          exportDetail={exportDetail}
-          exportCompleted={exportCompleted}
-          exportTotal={exportTotal}
-          profile={exportProfile}
-          locale={activeLocale}
-        />
-        <Inspector
-          slide={selectedSlide}
-          activeLocale={activeLocale}
-          onLocaleChange={changeActiveLocale}
-          onUpdate={updateSelectedSlide}
-          onTextUpdate={updateSelectedSlideText}
-          onImport={() => openImport()}
-          onImportIcon={() => openAppIconImport()}
-          onRemoveIcon={removeAppIcon}
-          onImportBackground={() => openBackgroundImageImport()}
-          onRemoveBackground={removeBackgroundImage}
-          selectedLayerId={selectedLayerId}
-          onLayerSelect={setSelectedLayerId}
-          profile={exportProfile}
-          preflight={preflight}
-          onProfileChange={changeExportProfile}
-          exportDisabled={exportStatus === 'exporting'}
-        />
-      </div>
+      {editorMode === 'guided' ? (
+        <GuidedShell {...shellProps} />
+      ) : editorView === 'classic' ? (
+        <>
+          <TopToolbar
+            projectName={projectName}
+            onProjectNameChange={changeProjectName}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={undo}
+            onRedo={redo}
+            onTemplates={() => setTemplatePickerOpen(true)}
+            templatesDisabled={!projectLoadComplete && !projectLoadFailed}
+            onOpenGuide={() => setOnboardingOpen(true)}
+            onImport={() => openImport()}
+            onImportMultiple={() => setScreenshotImportOpen(true)}
+            onOpen={() => projectInputRef.current?.click()}
+            onSave={saveProject}
+            onExport={() => void exportProject()}
+            exportStatus={exportStatus}
+            exportDetail={exportDetail}
+            exportCompleted={exportCompleted}
+            exportTotal={exportTotal}
+            canvasMode={canvasMode}
+            onCanvasModeChange={changeCanvasMode}
+            persistenceStatus={persistenceStatus}
+            persistenceDetail={persistenceDetail}
+            profile={exportProfile}
+            onShowFlowboard={() => setEditorView('flowboard')}
+            onOpenGuided={() => changeEditorMode('guided')}
+          />
+          <div className="editor-grid">
+            <SlideNavigator
+              slides={slides}
+              selectedId={selectedSlide.id}
+              onSelect={selectSlide}
+              onAdd={addSlide}
+              onDuplicate={duplicateSlide}
+              onDelete={deleteSlide}
+            />
+            <SlideCanvas
+              slides={slides}
+              selectedSlide={selectedSlide}
+              selectedIndex={selectedIndex}
+              selectedId={selectedSlide.id}
+              mode={canvasMode}
+              onModeChange={changeCanvasMode}
+              onSelect={selectSlide}
+              onImport={openImport}
+              onTransformChange={updateSlidePosition}
+              selectedLayerId={selectedLayerId}
+              onLayerSelect={setSelectedLayerId}
+              onLayerTransformChange={updateLayerPosition}
+              persistenceStatus={persistenceStatus}
+              persistenceDetail={persistenceDetail}
+              projectValidationNotice={projectValidationNotice}
+              exportStatus={exportStatus}
+              exportDetail={exportDetail}
+              exportCompleted={exportCompleted}
+              exportTotal={exportTotal}
+              profile={exportProfile}
+              locale={activeLocale}
+            />
+            <Inspector
+              slide={selectedSlide}
+              activeLocale={activeLocale}
+              onLocaleChange={changeActiveLocale}
+              onUpdate={updateSelectedSlide}
+              onTextUpdate={updateSelectedSlideText}
+              onImport={() => openImport()}
+              onImportIcon={() => openAppIconImport()}
+              onRemoveIcon={removeAppIcon}
+              onImportBackground={() => openBackgroundImageImport()}
+              onRemoveBackground={removeBackgroundImage}
+              selectedLayerId={selectedLayerId}
+              onLayerSelect={setSelectedLayerId}
+              profile={exportProfile}
+              preflight={preflight}
+              onProfileChange={changeExportProfile}
+              exportDisabled={exportStatus === 'exporting'}
+            />
+          </div>
+        </>
+      ) : (
+        <Flowboard {...shellProps} />
+      )}
       <input
         ref={fileInputRef}
         className="visually-hidden"

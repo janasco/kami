@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
-import { deviceFramePresets, getLayout, getTheme, sanitizeLayerOpacity, slideLayerLabels } from '../data'
+import { getLayout, getTheme, sanitizeLayerOpacity, slideLayerLabels } from '../data'
+import { getDeviceFramePreset, getDeviceFrameStyle } from '../lib/devicePresets'
 import { getSlideText } from '../lib/localization'
 import type {
   CanvasMode,
@@ -12,6 +13,7 @@ import type {
   SlideTransform,
 } from '../types'
 import { CanvasModeToggle } from './CanvasModeToggle'
+import { DeviceAperture } from './DeviceAperture'
 import type { ExportStatus, PersistenceStatus } from './TopToolbar'
 
 const persistenceLabel: Record<PersistenceStatus, string> = {
@@ -22,7 +24,7 @@ const persistenceLabel: Record<PersistenceStatus, string> = {
   'open-error': 'Open failed',
 }
 
-interface SlideCanvasProps {
+export interface SlideCanvasProps {
   slides: Slide[]
   selectedSlide: Slide
   selectedIndex: number
@@ -127,16 +129,6 @@ const layerStyle = (
   opacity: sanitizeLayerOpacity(settings.opacity),
 } as unknown as CSSProperties)
 
-function Placeholder({ onImport }: { onImport: () => void }) {
-  return (
-    <button className="device-placeholder" type="button" onClick={onImport}>
-      <span className="device-placeholder__icon" aria-hidden="true">↑</span>
-      <strong>Add your screenshot</strong>
-      <span>PNG, JPG, or WebP</span>
-    </button>
-  )
-}
-
 export function SlideRenderer({
   slide,
   slideNumber,
@@ -152,7 +144,9 @@ export function SlideRenderer({
 }: SlideRendererProps) {
   const theme = getTheme(slide.theme)
   const layout = getLayout(slide.layout)
-  const deviceFrame = deviceFramePresets.find((preset) => preset.id === slide.deviceFrameId) ?? deviceFramePresets[0]
+  // The frame geometry comes from the catalog, so the preview, the connected
+  // strip, and the export stage all draw the same device from the same numbers.
+  const deviceFrame = getDeviceFramePreset(slide.deviceFrameId)
   const text = getSlideText(slide, locale)
   const compositionDragRef = useRef<CompositionDragState | null>(null)
   const layerDragRef = useRef<LayerDragState | null>(null)
@@ -431,18 +425,17 @@ export function SlideRenderer({
           <div
             className={layerClassName('screenshot', 'phone-wrap')}
             data-layer-id="screenshot"
-            style={transformForLayer('screenshot')}
+            data-device-frameless={deviceFrame.family === 'frameless' ? 'true' : 'false'}
+            style={{ ...transformForLayer('screenshot'), ...getDeviceFrameStyle(deviceFrame.id) }}
             {...layerInteractionProps('screenshot')}
           >
             <div className="phone">
-              <div className="phone__speaker" />
-              <div className="phone__screen">
-                {slide.screenshot ? (
-                  <img src={slide.screenshot} alt={`Screenshot for slide ${slideNumber}`} draggable={false} />
-                ) : (
-                  <Placeholder onImport={onImport} />
-                )}
-              </div>
+              <DeviceAperture
+                slide={slide}
+                screenshot={slide.screenshot}
+                slideNumber={slideNumber}
+                onImport={onImport}
+              />
             </div>
             <div className="phone-shadow" />
           </div>

@@ -5,9 +5,12 @@ import {
   exportProfiles,
   localeOptions,
   pendingExportProfiles,
+  screenshotFitOptions,
   TRANSFORM_SIZE_MAX,
   TRANSFORM_SIZE_MIN,
 } from '../data'
+import { isKnownDeviceFrameId } from './devicePresets'
+import { isScreenshotFit } from './screenshotFit'
 
 export type ValidationSeverity = 'error' | 'warning'
 
@@ -36,6 +39,8 @@ const supportedThemes = new Set<string>(themes.map((theme) => theme.id))
 const supportedDevices = new Set<string>(deviceFramePresets.map((preset) => preset.id))
 const supportedLocales = new Set<string>(localeOptions.map((locale) => locale.id))
 const supportedProfiles = new Set<string>([...exportProfiles, ...pendingExportProfiles].map((profile) => profile.id))
+const supportedScreenshotFits = new Set<string>(screenshotFitOptions.map((option) => option.id))
+const screenshotFitIds = [...supportedScreenshotFits]
 const legacyLayouts = new Set(['portrait-store'])
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -246,7 +251,15 @@ export function validateProjectDocument(value: unknown, options: ValidationOptio
       requireString(slide.themeId, `${path}.themeId`, issues)
       if (!supportedThemes.has(String(slide.themeId))) addIssue(issues, `${path}.themeId`, 'unsupported-theme', 'Slide theme is not supported by this editor.')
       if (Array.isArray(value.themes) && value.themes.length > 0 && isString(slide.themeId) && !value.themes.some((theme) => isRecord(theme) && theme.id === slide.themeId)) addIssue(issues, `${path}.themeId`, 'missing-reference', 'Slide references a theme definition that does not exist.')
-      if (slide.deviceFrameId !== undefined && !supportedDevices.has(String(slide.deviceFrameId))) addIssue(issues, `${path}.deviceFrameId`, 'unsupported-device-frame', 'Device frame is not supported by this editor.')
+      if (slide.deviceFrameId !== undefined && !supportedDevices.has(String(slide.deviceFrameId))) {
+        // A pre-catalog spelling is still openable: the migration maps it onto
+        // the preset it meant, so it is reported rather than rejected.
+        if (isKnownDeviceFrameId(slide.deviceFrameId)) {
+          issues.push({ ...issue(`${path}.deviceFrameId`, 'legacy-device-frame', 'Device frame uses an older name and will be updated on open.'), severity: 'warning' })
+        } else addIssue(issues, `${path}.deviceFrameId`, 'unsupported-device-frame', 'Device frame is not supported by this editor.')
+      }
+      if (slide.showDeviceStatusBar !== undefined && typeof slide.showDeviceStatusBar !== 'boolean') addIssue(issues, `${path}.showDeviceStatusBar`, 'invalid-device-setting', 'The device status bar flag must be a boolean.')
+      if (slide.screenshotFit !== undefined && !isScreenshotFit(slide.screenshotFit)) addIssue(issues, `${path}.screenshotFit`, 'invalid-device-setting', `The screenshot fit must be one of: ${screenshotFitIds.join(', ')}.`)
       validateFrame(slide.frame, `${path}.frame`, issues)
       validateTransform(slide.transform, `${path}.transform`, issues)
       if (!Array.isArray(slide.layers)) {

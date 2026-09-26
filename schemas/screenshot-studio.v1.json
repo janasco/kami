@@ -133,6 +133,8 @@
         "frame": { "$ref": "#/$defs/frame" },
         "layoutId": { "$ref": "#/$defs/id" },
         "themeId": { "$ref": "#/$defs/id" },
+        "deviceFrameId": { "enum": ["iphone", "iphone-se", "iphone-island", "iphone-island-max", "ipad-mini", "ipad-air", "android", "android-pixel", "android-galaxy", "android-tablet", "none", "canvas"] },
+        "showDeviceStatusBar": { "type": "boolean" },
         "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } }
       },
       "additionalProperties": true

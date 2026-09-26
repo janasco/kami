@@ -272,8 +272,8 @@ export function LandingPage() {
           <Brand />
           <p>Thoughtful screenshot tools for independent makers.</p>
           <nav aria-label="Footer navigation">
-            <a href={editorHref}>Local editor</a>
-            <a href="https://github.com/janasco/kami" target="_blank" rel="noreferrer">GitHub ↗</a>
+            <a className="landing-button landing-button--quiet" href={editorHref}>Local editor</a>
+            <a className="landing-button landing-button--quiet" href="https://github.com/janasco/kami" target="_blank" rel="noreferrer">GitHub ↗</a>
           </nav>
         </div>
       </footer>

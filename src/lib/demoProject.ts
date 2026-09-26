@@ -2,10 +2,12 @@ import {
   createDefaultAccentShapeStyle,
   createDefaultLayerSettings,
   createDefaultLayerTransforms,
+  DEFAULT_SCREENSHOT_FIT,
   DEFAULT_SLIDE_TRANSFORM,
+  defaultShowDeviceStatusBar,
 } from '../data'
 import type { EditorProject } from './project'
-import type { AccentShapeStyle, DeviceFrameId, LayoutId, Slide, ThemeId } from '../types'
+import type { AccentShapeStyle, DeviceFrameId, LayoutId, ScreenshotFit, Slide, ThemeId } from '../types'
 
 interface DemoSlideDefaults {
   title: string
@@ -13,6 +15,10 @@ interface DemoSlideDefaults {
   layout: LayoutId
   theme: ThemeId
   deviceFrameId: DeviceFrameId
+  /** Omit to inherit the device default. */
+  showDeviceStatusBar?: boolean
+  /** Omit to keep the whole capture visible inside the device aperture. */
+  screenshotFit?: ScreenshotFit
   accentShapeStyle: AccentShapeStyle
   screenshotTransform: Partial<Slide['layerTransforms']['screenshot']>
   headlineTransform?: Partial<Slide['layerTransforms']['headline']>
@@ -93,6 +99,9 @@ const createDemoSlide = (defaults: DemoSlideDefaults, screenshotIndex: number, a
     layout: defaults.layout,
     theme: defaults.theme,
     deviceFrameId: defaults.deviceFrameId,
+    showDeviceStatusBar: defaults.showDeviceStatusBar
+      ?? defaultShowDeviceStatusBar(defaults.deviceFrameId),
+    screenshotFit: defaults.screenshotFit ?? DEFAULT_SCREENSHOT_FIT,
     transform: { ...DEFAULT_SLIDE_TRANSFORM },
     layerTransforms,
     layerSettings: createDefaultLayerSettings(),

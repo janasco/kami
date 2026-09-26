@@ -10,7 +10,13 @@ export type ExportProgress = {
 
 const waitForBrowser = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0))
 
-const filenamePart = (name: string) => {
+/**
+ * The project name turned into the ZIP filename.
+ *
+ * Exported so a surface that names the download before it happens, such as the
+ * guided Download step, shows the file the export will really write.
+ */
+export const filenamePart = (name: string) => {
   const cleaned = name
     .trim()
     .toLowerCase()

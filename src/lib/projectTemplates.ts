@@ -2,9 +2,12 @@ import {
   createDefaultAccentShapeStyle,
   createDefaultLayerSettings,
   createDefaultLayerTransforms,
+  DEFAULT_SCREENSHOT_FIT,
   DEFAULT_SLIDE_TRANSFORM,
+  defaultShowDeviceStatusBar,
   deviceFramePresets,
   layouts,
+  screenshotFitOptions,
   slideLayerIds,
   themes,
 } from '../data'
@@ -14,6 +17,7 @@ import type {
   LayerId,
   LayerSettings,
   LayoutId,
+  ScreenshotFit,
   Slide,
   SlideTransform,
   ThemeId,
@@ -41,6 +45,10 @@ export interface ProjectTemplateSlide {
   layout: LayoutId
   theme: ThemeId
   deviceFrameId: DeviceFrameId
+  /** Omit to inherit the device default (on for framed presets, off for frameless). */
+  showDeviceStatusBar?: boolean
+  /** Omit to keep the whole capture visible inside the device aperture. */
+  screenshotFit?: ScreenshotFit
   transform?: Partial<SlideTransform>
   layerTransforms?: TemplateLayerTransforms
   layerSettings?: TemplateLayerSettings
@@ -461,6 +469,12 @@ export const validateProjectTemplateCatalog = (
       if (!layouts.some((layout) => layout.id === slide.layout)) errors.push(`${slidePath}.layout is unsupported`)
       if (!themes.some((theme) => theme.id === slide.theme)) errors.push(`${slidePath}.theme is unsupported`)
       if (!deviceFramePresets.some((preset) => preset.id === slide.deviceFrameId)) errors.push(`${slidePath}.deviceFrameId is unsupported`)
+      if (slide.showDeviceStatusBar !== undefined && typeof slide.showDeviceStatusBar !== 'boolean') {
+        errors.push(`${slidePath}.showDeviceStatusBar must be a boolean`)
+      }
+      if (slide.screenshotFit !== undefined && !screenshotFitOptions.some((option) => option.id === slide.screenshotFit)) {
+        errors.push(`${slidePath}.screenshotFit must be one of: ${screenshotFitOptions.map((option) => option.id).join(', ')}`)
+      }
 
       const forbiddenAssetKeys = ['screenshot', 'screenshotName', 'appIcon', 'backgroundImage'] as const
       forbiddenAssetKeys.forEach((key) => {
@@ -517,6 +531,9 @@ export const createSlidesFromProjectTemplate = (template: ProjectTemplate): Slid
       layout: defaults.layout,
       theme: defaults.theme,
       deviceFrameId: defaults.deviceFrameId,
+      showDeviceStatusBar: defaults.showDeviceStatusBar
+        ?? defaultShowDeviceStatusBar(defaults.deviceFrameId),
+      screenshotFit: defaults.screenshotFit ?? DEFAULT_SCREENSHOT_FIT,
       transform: { ...DEFAULT_SLIDE_TRANSFORM, ...defaults.transform },
       layerTransforms,
       layerSettings,

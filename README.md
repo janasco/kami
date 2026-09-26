@@ -24,6 +24,7 @@ Kami prepares image assets to the selected output dimensions; it does not guaran
 
 - Import PNG, JPG, and WebP screenshots, app icons, and background images.
 - Build individual or connected panoramic screenshot stories with reusable layouts, themes, and iPhone, Android, or frameless previews.
+- Add an optional device status bar with a fixed 9:41 clock and local signal, Wi-Fi, and battery indicators.
 - Edit copy and layer visibility, colors, opacity, position, scale, rotation, size, and flips with direct canvas controls.
 - Preview English, Spanish, and Arabic copy, including RTL layouts.
 - Save browser drafts with IndexedDB when available and open or save the portable `screenshot-studio.json` project.

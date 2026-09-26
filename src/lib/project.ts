@@ -1,8 +1,10 @@
-import { createDefaultAccentShapeStyle, createDefaultLayerSettings, createDefaultLayerTransforms, DEFAULT_DEVICE_FRAME_ID, DEFAULT_SLIDE_TRANSFORM, deviceFramePresets, exportProfiles, layouts as editorLayouts, localeOptions, pendingExportProfiles, sanitizeLayerOpacity, themes as editorThemes, TRANSFORM_SIZE_MAX, TRANSFORM_SIZE_MIN } from '../data'
+import { createDefaultAccentShapeStyle, createDefaultLayerSettings, createDefaultLayerTransforms, DEFAULT_SLIDE_TRANSFORM, exportProfiles, layouts as editorLayouts, localeOptions, pendingExportProfiles, resolveDeviceFrameId, sanitizeLayerOpacity, themes as editorThemes, TRANSFORM_SIZE_MAX, TRANSFORM_SIZE_MIN } from '../data'
 import { loadAutosavedDocument, saveAutosavedDocument } from './autosave'
+import { resolveShowDeviceStatusBar } from './deviceStatusBar'
 import { migrateProjectDocument, type MigrationReport } from './projectMigration'
+import { resolveScreenshotFit } from './screenshotFit'
 import { PROJECT_VERSION, validateProjectDocument, validationSummary, type ValidationReport } from './projectValidation'
-import type { AccentShapeStyle, CanvasMode, DeviceFrameId, ExportProfile, ExportProfileId, LayerId, LayoutId, LocaleId, Slide, SlideTextCopy, SlideTransform, ThemeId } from '../types'
+import type { AccentShapeStyle, CanvasMode, DeviceFrameId, ExportProfile, ExportProfileId, LayerId, LayoutId, LocaleId, ScreenshotFit, Slide, SlideTextCopy, SlideTransform, ThemeId } from '../types'
 const CANVAS_ID = 'main-story'
 const AUTHORING_PROFILE = exportProfiles[0]
 const CANVAS_WIDTH = AUTHORING_PROFILE.width
@@ -65,6 +67,8 @@ interface ProjectFile {
     layoutId: LayoutId
     themeId: ThemeId
     deviceFrameId: DeviceFrameId
+    showDeviceStatusBar: boolean
+    screenshotFit: ScreenshotFit
     transform: SlideTransform
     layers: Array<{
       id: string
@@ -382,7 +386,11 @@ export function serializeProject(project: EditorProject): ProjectFile {
         frame: frame(index * selectedProfile.width, 0, selectedProfile.width, selectedProfile.height),
         layoutId: slide.layout,
         themeId: slide.theme,
-        deviceFrameId: slide.deviceFrameId,
+        // Normalized on the way out, so a saved project only ever carries a
+        // current catalog ID and an older spelling cannot travel any further.
+        deviceFrameId: resolveDeviceFrameId(slide.deviceFrameId),
+        showDeviceStatusBar: slide.showDeviceStatusBar,
+        screenshotFit: slide.screenshotFit,
         transform: { ...slide.transform },
         layers,
       }
@@ -472,11 +480,6 @@ const supportedLayout = (value: string): LayoutId =>
 
 const supportedTheme = (value: string): ThemeId =>
   editorThemes.some((theme) => theme.id === value) ? value as ThemeId : 'midnight'
-
-const supportedDeviceFrame = (value: unknown): DeviceFrameId =>
-  typeof value === 'string' && deviceFramePresets.some((preset) => preset.id === value)
-    ? value as DeviceFrameId
-    : DEFAULT_DEVICE_FRAME_ID
 
 const parseTransform = (value: unknown): SlideTransform => {
   if (!isRecord(value)) return { ...DEFAULT_SLIDE_TRANSFORM }
@@ -735,6 +738,8 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
     const titleMessages = getMessages(localization as JsonRecord | null, titleKey)
     const subtitleMessages = getMessages(localization as JsonRecord | null, subtitleKey)
 
+    const deviceFrameId = resolveDeviceFrameId(slide.deviceFrameId)
+
     restoredSlides.push({
       id: slide.id,
       title: getMessage(titleMessages, project.defaultLocale),
@@ -742,7 +747,11 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
       translations: getTranslations(localization as JsonRecord | null, titleKey, subtitleKey),
       layout: supportedLayout(slide.layoutId),
       theme: supportedTheme(slide.themeId),
-      deviceFrameId: supportedDeviceFrame(slide.deviceFrameId),
+      deviceFrameId,
+      // Older projects predate the field; derive the default from the frame preset.
+      showDeviceStatusBar: resolveShowDeviceStatusBar(deviceFrameId, slide.showDeviceStatusBar),
+      // Older projects predate the field; contain keeps the capture uncropped.
+      screenshotFit: resolveScreenshotFit(slide.screenshotFit),
       transform: parseTransform(slide.transform),
       layerTransforms,
       layerSettings,

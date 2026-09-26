@@ -28,6 +28,13 @@ interface TopToolbarProps {
   persistenceStatus: PersistenceStatus
   persistenceDetail: string
   profile: ExportProfile
+  /** Optional escape hatch back to the Flowboard shell. */
+  onShowFlowboard?: () => void
+  /**
+   * Optional way back to Guided mode, so the mode switch is reachable from
+   * every shell rather than only from the one that started there.
+   */
+  onOpenGuided?: () => void
 }
 
 const persistenceLabel: Record<PersistenceStatus, string> = {
@@ -62,17 +69,24 @@ export function TopToolbar({
   persistenceStatus,
   persistenceDetail,
   profile,
+  onShowFlowboard,
+  onOpenGuided,
 }: TopToolbarProps) {
   return (
     <header className="top-toolbar">
-      <div className="brand" aria-label="Kami home">
+      <a
+        className="brand"
+        href={import.meta.env.BASE_URL}
+        aria-label="Back to Kami landing page"
+        title="Back to Kami landing page"
+      >
         <span className="brand-mark" aria-hidden="true">
           <i />
           <i />
           <i />
         </span>
         <span>Kami</span>
-      </div>
+      </a>
 
       <div className="top-toolbar__divider" />
 
@@ -160,6 +174,26 @@ export function TopToolbar({
             : 'Export'}
           <span aria-hidden="true">→</span>
         </button>
+        {onShowFlowboard && (
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={onShowFlowboard}
+            title="Return to the Flowboard staged editor"
+          >
+            <span aria-hidden="true">▦</span> Flowboard
+          </button>
+        )}
+        {onOpenGuided && (
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={onOpenGuided}
+            title="Switch to the four-step Guided mode"
+          >
+            <span aria-hidden="true">☰</span> Back to guided
+          </button>
+        )}
       </div>
     </header>
   )

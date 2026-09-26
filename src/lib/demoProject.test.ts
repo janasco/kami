@@ -53,4 +53,28 @@ describe('demo project portability', () => {
     expect(result.project.slides.every((slide) => slide.screenshot?.startsWith('data:image/svg+xml;base64,'))).toBe(true)
     expect(result.project.slides.every((slide) => slide.appIcon?.dataUrl.startsWith('data:image/svg+xml;base64,'))).toBe(true)
   })
+
+  it('keeps device status chrome on framed demo slides and off frameless ones', () => {
+    const original = createDemoProject()
+    const result = parseProjectDocument(JSON.stringify(serializeProject(original)))
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    expect(result.project.slides.map((slide) => [slide.deviceFrameId, slide.showDeviceStatusBar])).toEqual([
+      ['iphone', true],
+      ['iphone', true],
+      ['none', false],
+    ])
+  })
+
+  it('keeps the demo captures fully visible with the contain fit', () => {
+    const original = createDemoProject()
+    const result = parseProjectDocument(JSON.stringify(serializeProject(original)))
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    expect(result.project.slides.map((slide) => slide.screenshotFit)).toEqual(['contain', 'contain', 'contain'])
+  })
 })

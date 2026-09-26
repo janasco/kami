@@ -1,4 +1,15 @@
-import type { AccentShapeStyle, DeviceFrameId, DeviceFramePreset, ExportProfile, LayerId, LayerSettingsById, LayoutId, LocaleId, LocaleOption, Slide, SlideTransform, ThemeId } from './types'
+import type { AccentShapeStyle, ExportProfile, LayerId, LayerSettingsById, LayoutId, LocaleId, LocaleOption, ScreenshotFit, Slide, SlideTransform, ThemeId } from './types'
+import { DEFAULT_DEVICE_FRAME_ID, defaultShowDeviceStatusBar } from './lib/devicePresets'
+
+// The device catalog is parametric data with its own derivation helpers, so it
+// is re-exported from here to keep one import site for the editor defaults.
+export {
+  DEFAULT_DEVICE_FRAME_ID,
+  defaultShowDeviceStatusBar,
+  deviceFramePresets,
+  FRAMELESS_DEVICE_FRAME_ID,
+  resolveDeviceFrameId,
+} from './lib/devicePresets'
 
 export const layouts: Array<{
   id: LayoutId
@@ -39,12 +50,20 @@ export const getLayout = (id: unknown) =>
 export const getTheme = (id: unknown) =>
   themes.find((theme) => theme.id === id) ?? themes[0]
 
-export const DEFAULT_DEVICE_FRAME_ID: DeviceFrameId = 'iphone'
+/**
+ * Default fit for imported captures. `contain` keeps the entire screenshot
+ * visible, which is the safe choice because a cropped capture hides UI the
+ * author never meant to remove.
+ */
+export const DEFAULT_SCREENSHOT_FIT: ScreenshotFit = 'contain'
 
-export const deviceFramePresets: DeviceFramePreset[] = [
-  { id: 'iphone', name: 'iPhone', description: 'Notched phone frame' },
-  { id: 'android', name: 'Android', description: 'Centered camera phone frame' },
-  { id: 'none', name: 'No frame', description: 'Clean screenshot at the same aperture' },
+export const screenshotFitOptions: Array<{
+  id: ScreenshotFit
+  label: string
+  description: string
+}> = [
+  { id: 'contain', label: 'Contain', description: 'Whole capture inside the frame' },
+  { id: 'cover', label: 'Cover', description: 'Fill the frame and crop the edges' },
 ]
 
 export const localeOptions: LocaleOption[] = [
@@ -207,6 +226,8 @@ export const starterSlide: Slide = {
   layout: 'hero',
   theme: 'midnight',
   deviceFrameId: DEFAULT_DEVICE_FRAME_ID,
+  showDeviceStatusBar: defaultShowDeviceStatusBar(DEFAULT_DEVICE_FRAME_ID),
+  screenshotFit: DEFAULT_SCREENSHOT_FIT,
   transform: { ...DEFAULT_SLIDE_TRANSFORM },
   layerTransforms: createDefaultLayerTransforms(),
   layerSettings: createDefaultLayerSettings(),
@@ -224,6 +245,8 @@ export const createSlide = (): Slide => ({
   layout: 'centered',
   theme: 'midnight',
   deviceFrameId: DEFAULT_DEVICE_FRAME_ID,
+  showDeviceStatusBar: defaultShowDeviceStatusBar(DEFAULT_DEVICE_FRAME_ID),
+  screenshotFit: DEFAULT_SCREENSHOT_FIT,
   transform: { ...DEFAULT_SLIDE_TRANSFORM },
   layerTransforms: createDefaultLayerTransforms(),
   layerSettings: createDefaultLayerSettings(),
