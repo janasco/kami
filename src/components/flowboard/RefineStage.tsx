@@ -10,12 +10,13 @@ import { getSlideText } from '../../lib/localization'
 import { isRefineIssue } from '../../lib/flowboardStages'
 import type { ExportPreflightResult } from '../../lib/exportPreflight'
 import type { ArrangeScope } from '../../lib/layerArrange'
-import type { LayoutId, ThemeId } from '../../types'
+import type { LayoutId, OutputVariant, ThemeId } from '../../types'
 import type { CopyEditorRequest } from './useFlowboardStagePanels'
 import { Inspector, type InspectorProps } from '../Inspector'
 import { BackgroundFillControls } from '../BackgroundFillControls'
 import { LayerArrangeControls } from '../LayerArrangeControls'
 import { LayerTransformControls, LayerTransformResetButton } from '../LayerTransformControls'
+import { RefineVariantPreview } from '../RefineVariantPreview'
 import { SlideCanvas, type SlideCanvasProps } from '../SlideCanvas'
 
 interface RefineStageProps {
@@ -23,6 +24,22 @@ interface RefineStageProps {
   inspector: InspectorProps
   preflight: ExportPreflightResult
   onGoToSlide: (slideId: string) => void
+  /**
+   * The deck's variants, for the merged preview picker. A deck with one default
+   * variant always has exactly one, so the picker is never empty once a deck
+   * exists. Optional because a caller with nothing to preview — Guided mode
+   * before a deck is loaded, a test rendering the canvas on its own — gets the
+   * stage it had before this surface existed: no picker, no preview, the same
+   * editable canvas.
+   */
+  variants?: OutputVariant[]
+  /**
+   * The variant the Refine canvas is previewing, or `''` for the editable deck.
+   * Held by the shell rather than by this stage so a choice made here survives
+   * moving to another stage and back.
+   */
+  variantPreviewId?: string
+  onVariantPreviewIdChange?: (variantId: string) => void
   /**
    * Set when another stage, such as the Story translation matrix, asked for the
    * copy editor. The requested field is focused once the slide and locale match.
@@ -50,7 +67,16 @@ const issueSlideLabel = (slideNumbers: number[]) => {
  * The full Inspector stays available as a drawer so nothing from the classic
  * editor is lost, and preflight issues are always one click away.
  */
-export function RefineStage({ canvas, inspector, preflight, onGoToSlide, copyEditorRequest }: RefineStageProps) {
+export function RefineStage({
+  canvas,
+  inspector,
+  preflight,
+  onGoToSlide,
+  variants = [],
+  variantPreviewId = '',
+  onVariantPreviewIdChange = () => undefined,
+  copyEditorRequest,
+}: RefineStageProps) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   /**
    * Canvas guides and the arrange scope are UI-only choices. Neither is
@@ -59,6 +85,12 @@ export function RefineStage({ canvas, inspector, preflight, onGoToSlide, copyEdi
    */
   const [guidesVisible, setGuidesVisible] = useState(true)
   const [arrangeScope, setArrangeScope] = useState<ArrangeScope>('layer')
+  /**
+   * Which slide of a variant the merged preview holds. Empty means "follow the
+   * deck's selected slide", which is what it does until the author steps through
+   * the variant. Also UI-only: the preview writes nothing to either.
+   */
+  const [variantPreviewSlideId, setVariantPreviewSlideId] = useState('')
   const slide = inspector.slide
   const text = getSlideText(slide, inspector.activeLocale)
   const selectedSettings = slide.layerSettings[inspector.selectedLayerId]
@@ -66,6 +98,12 @@ export function RefineStage({ canvas, inspector, preflight, onGoToSlide, copyEdi
   const layerIssues = preflight.issues.filter(isRefineIssue)
   const slideIdToIndex = (slideNumber: number) => canvas.slides[slideNumber - 1]?.id
   const handledCopyRequestRef = useRef(0)
+  /*
+   * Whether the merged preview is on. Decided by whether the chosen id is a
+   * variant this deck actually has, so a stale id from a removed variant falls
+   * back to the editable canvas rather than rendering nothing.
+   */
+  const previewing = variants.some((variant) => variant.id === variantPreviewId)
 
   /**
    * Focuses the tray copy editor when another stage asked for it. The request
@@ -117,10 +155,40 @@ export function RefineStage({ canvas, inspector, preflight, onGoToSlide, copyEdi
           </div>
         </div>
         <p className="flowboard-hint">
-          Click any layer on the canvas to select it, then drag to reposition. Arrow keys nudge the selected layer, Shift for a bigger step and Alt for a finer one.
+          {previewing
+            /*
+             * Accurate about the tray, because it is genuinely still live: the
+             * tray edits the deck's own slide, and the preview follows from it
+             * except where the variant pins that layer's placement for its own
+             * device. Saying so beats a hint that implies the tray is disabled.
+             */
+            ? 'The canvas is showing a variant’s export, read-only. Pick Deck to carry on editing. The property tray still edits the deck’s own slide, which is what the preview is built from.'
+            : 'Click any layer on the canvas to select it, then drag to reposition. Arrow keys nudge the selected layer, Shift for a bigger step and Alt for a finer one.'}
         </p>
         <div className="flowboard-refine__stage">
-          <SlideCanvas {...canvas} showGuides={guidesVisible} />
+          {/*
+            The picker is mounted in both states, so which surface is on screen is
+            one control rather than a mode an author has to discover. The two
+            branches are the only difference: with a variant chosen the canvas is
+            the read-only merged render, and with Deck chosen it is the editable
+            canvas exactly as it has always been, with the same props and the
+            same guides. With no variants to preview the picker is not rendered at
+            all, and this stage is byte-for-byte the stage it was.
+          */}
+          {variants.length > 0 && (
+            <RefineVariantPreview
+              slides={canvas.slides}
+              selectedSlideId={canvas.selectedId}
+              variants={variants}
+              value={previewing ? variantPreviewId : ''}
+              onChange={onVariantPreviewIdChange}
+              previewSlideId={variantPreviewSlideId}
+              onPreviewSlideChange={setVariantPreviewSlideId}
+              profile={canvas.profile}
+              locale={canvas.locale}
+            />
+          )}
+          {!previewing && <SlideCanvas {...canvas} showGuides={guidesVisible} />}
         </div>
       </section>
 

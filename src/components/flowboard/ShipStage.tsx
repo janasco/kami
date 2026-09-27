@@ -1,10 +1,14 @@
+import { useMemo } from 'react'
 import { deviceFramePresets, exportProfiles, screenshotFitOptions } from '../../data'
 import { describeDeviceVariant, expandVariantRenders, findDeviceOverride } from '../../lib/deviceVariants'
 import { formatPreflightIssueLocation, type ExportPreflightResult } from '../../lib/exportPreflight'
-import { exportEntryName, type ExportEntry, type ExportPlan } from '../../lib/exportPlan'
+import { type ExportEntry, type ExportPlan } from '../../lib/exportPlan'
 import { variantExportRefusal } from '../../lib/exportPlan'
+import { buildExportManifest, type ExportManifest } from '../../lib/exportManifest'
+import { buildStorePreview, type StorePreview as StorePreviewModel } from '../../lib/storePreview'
 import type { FlowboardExportGate } from '../../lib/flowboardExportState'
-import type { DeviceFrameId, ExportProfile, ExportProfileId, OutputVariant, ScreenshotFit, Slide } from '../../types'
+import { StorePreview } from '../StorePreview'
+import type { DeviceFrameId, ExportProfile, ExportProfileId, LocaleId, OutputVariant, ScreenshotFit, Slide } from '../../types'
 
 export interface ShipStageProps {
   projectName: string
@@ -44,6 +48,15 @@ export interface ShipStageProps {
   onSaveProject: () => void
   onOpenProject: () => void
   onGoToSlide: (slideId: string) => void
+  /**
+   * Sends the Refine canvas to one variant's merged preview. The one way into
+   * that surface from here, so a variant an author has just configured is one
+   * keystroke from being looked at. Optional, because a caller with nowhere to
+   * send the author simply has no such button.
+   */
+  onOpenVariantPreview?: (variantId: string) => void
+  /** The editor's active locale, for the headline the store preview reports on. */
+  activeLocale?: LocaleId
 }
 
 const preflightStatusLabel = {
@@ -57,8 +70,9 @@ const variantDeviceOptions = deviceFramePresets.filter((preset) => preset.id !==
 
 /**
  * Stage 5. A review surface rather than a toolbar: the preflight result, the
- * device variants and what each will write, the store profile, the deck facts
- * the author should confirm, and the export.
+ * device variants and what each will write, the store listing as a reader would
+ * meet it, the manifest of every file the export writes, the store profile, the
+ * deck facts the author should confirm, and the export.
  */
 export function ShipStage({
   projectName,
@@ -85,12 +99,34 @@ export function ShipStage({
   onSaveProject,
   onOpenProject,
   onGoToSlide,
+  onOpenVariantPreview,
+  activeLocale = 'en-US',
 }: ShipStageProps) {
   const captureCount = slides.filter((slide) => slide.screenshot).length
   const iconCount = slides.filter((slide) => slide.appIcon && slide.layerSettings['app-icon'].visible).length
   const selectedNumber = slides.findIndex((slide) => slide.id === selectedSlide.id) + 1
   const activeVariant = variants.find((variant) => variant.id === activeVariantId) ?? variants[0]
   const enabledCount = variants.filter((variant) => variant.enabled).length
+
+  /*
+   * The manifest and the store preview are both derived from the plan, in a
+   * `useMemo` because the Ship stage re-renders on every keystroke of the
+   * variant name field and neither derivation depends on that. Nothing here is
+   * stored: the manifest is a question asked of the plan, and a plan saved
+   * yesterday cannot disagree with the export running today.
+   */
+  const plan: ExportPlan = useMemo(
+    () => ({ entries: exportEntries, blocked: exportBlockedVariant }),
+    [exportBlockedVariant, exportEntries],
+  )
+  const manifest: ExportManifest = useMemo(
+    () => buildExportManifest({ plan, profile, variants, locale: activeLocale }),
+    [activeLocale, plan, profile, variants],
+  )
+  const storePreview: StorePreviewModel = useMemo(
+    () => buildStorePreview({ plan, profile, variants, locale: activeLocale, variantId: activeVariant?.id }),
+    [activeLocale, activeVariant?.id, plan, profile, variants],
+  )
 
   return (
     <div className="flowboard-stage-body flowboard-ship">
@@ -332,6 +368,26 @@ export function ShipStage({
                         )
                       })}
                     </div>
+                    {/*
+                      Only offered when the shell can actually send the author
+                      there. A permanently disabled button teaches an author that
+                      the feature is broken, which is worse than its absence.
+                    */}
+                    {onOpenVariantPreview && (
+                      <div className="ship-variant__actions">
+                        <button
+                          className="button button--quiet button--small"
+                          type="button"
+                          onClick={() => onOpenVariantPreview(variant.id)}
+                          disabled={!variant.slideIds.includes(selectedSlide.id)}
+                          title={variant.slideIds.includes(selectedSlide.id)
+                            ? 'Show this variant’s export for the selected slide on the Refine canvas'
+                            : 'This variant does not render the selected slide, so there is nothing to show for it'}
+                        >
+                          <span aria-hidden="true">◱</span> Show on canvas
+                        </button>
+                      </div>
+                    )}
                     <p className="flowboard-hint">
                       {activeVariant.exportProfileId === profile.id
                         ? `Previewing the device set this profile exports. ${profileName} is the store target.`
@@ -360,18 +416,58 @@ export function ShipStage({
           </button>
         </div>
 
-        {exportEntries.length > 0 && (
+        {/*
+          The manifest. Every row is derived from the plan, so the file names here
+          are the names the bundle will carry, the sizes are the sizes it will be
+          written at, and the locale is the locale each PNG is drawn in. Derived
+          rather than stored, so there is nothing to go stale and nothing to
+          migrate.
+        */}
+        {manifest.entries.length > 0 && (
           <div className="ship-variant__bundle">
             <h4 className="ship-variant__bundle-title">In the ZIP</h4>
-            <ul className="ship-variant__files" role="list">
-              {exportEntries.map((entry) => (
-                <li key={`${entry.variantId}-${entry.slideId}`}>
-                  <code>{exportEntryName(profile.id, entry.variantName, entry.slideNumber)}</code>
-                </li>
-              ))}
-            </ul>
+            <p className="flowboard-hint">
+              {`${manifest.entries.length} file${manifest.entries.length === 1 ? '' : 's'} for ${manifest.profileName}, written at ${manifest.width} × ${manifest.height} px. Names and order below are the order the export writes them in.`}
+            </p>
+            <div className="ship-manifest">
+              <table className="ship-manifest__table">
+                <caption className="visually-hidden">
+                  {`Export manifest: ${manifest.entries.length} files for ${manifest.profileName}`}
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">File</th>
+                    <th scope="col">Variant</th>
+                    <th scope="col">Deck slide</th>
+                    <th scope="col">Size</th>
+                    <th scope="col">Locale</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {manifest.entries.map((entry) => (
+                    <tr key={`${entry.variantId}-${entry.slideId}`}>
+                      <th scope="row"><code>{entry.filename}</code></th>
+                      <td>{entry.variantName}</td>
+                      <td>{entry.slideNumber}</td>
+                      <td>{entry.dimensions}</td>
+                      <td>{entry.locale}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
+      </section>
+
+      {/*
+        The store listing. It describes the surface a reader meets the set on and
+        reports what this set contains, and every sentence in it comes from the
+        listing catalog in `data.ts`. It asserts nothing about what a store will
+        accept, because nothing in this editor can find out.
+      */}
+      <section className="flowboard-panel flowboard-panel--wide" aria-labelledby="ship-store-title">
+        <StorePreview preview={storePreview} slides={slides} />
       </section>
 
       <section className="flowboard-panel flowboard-panel--wide" aria-labelledby="ship-profile-title">

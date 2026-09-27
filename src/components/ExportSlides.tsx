@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 import type { ExportProfile, LocaleId, OutputVariant } from '../types'
 import type { ExportEntry } from '../lib/exportPlan'
+import { exportRenderProps } from '../lib/exportRenderProps'
 import { SlideRenderer } from './SlideCanvas'
 
 interface ExportSlidesProps {
@@ -25,11 +26,14 @@ interface ExportSlidesProps {
  * the store preview all come from the same plan. Every node carries its variant
  * and deck position as data attributes, so a mislaid node is visible in the DOM
  * rather than only in a wrong filename.
+ *
+ * The renderer's props come from `exportRenderProps`, the same builder the merged
+ * variant preview uses. That is what makes the preview a preview rather than a
+ * second implementation: both surfaces hand the one renderer the identical
+ * read-only prop set, so a preview that showed something the export would not is
+ * not a state the code can reach.
  */
 export function ExportSlides({ entries, variants, profile, locale, stageRef }: ExportSlidesProps) {
-  const localeOf = (variantId: string) =>
-    variants.find((variant) => variant.id === variantId)?.locale ?? locale
-
   return (
     <div
       ref={stageRef}
@@ -47,12 +51,18 @@ export function ExportSlides({ entries, variants, profile, locale, stageRef }: E
           style={{ width: profile.width, height: profile.height }}
         >
           <SlideRenderer
-            slide={entry.slide}
-            slideNumber={index + 1}
-            onImport={() => undefined}
-            profile={profile}
-            locale={localeOf(entry.variantId)}
-            exportMode
+            {...exportRenderProps({
+              slide: entry.slide,
+              // The deck position, not the position in the bundle: the deck is
+              // the coordinate system every "open this slide" affordance uses,
+              // and an alt text that said slide 7 of a 3-slide deck is noise.
+              slideNumber: entry.slideNumber,
+              variantId: entry.variantId,
+              profile,
+              variants,
+              locale,
+              onImport: () => undefined,
+            })}
           />
         </div>
       ))}

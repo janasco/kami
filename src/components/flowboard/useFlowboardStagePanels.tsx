@@ -113,6 +113,15 @@ export function useFlowboardStagePanels(
   const [editingCell, setEditingCell] = useState<TranslationCellRef | null>(null)
   const [copyEditorRequest, setCopyEditorRequest] = useState<CopyEditorRequest | null>(null)
   const copyEditorTokenRef = useRef(0)
+  /**
+   * Which variant the Refine canvas is previewing, or `''` for the editable
+   * deck. Held here rather than inside the Refine stage for two reasons: the
+   * Ship stage's "Show on canvas" button has to be able to set it and move the
+   * author there, and a choice made on the canvas has to survive the author
+   * walking to another stage and back. UI-only, like everything else in this
+   * hook, and never serialized.
+   */
+  const [refineVariantPreviewId, setRefineVariantPreviewId] = useState('')
 
   const deckInput = useMemo(() => ({
     projectName: props.projectName,
@@ -193,6 +202,18 @@ export function useFlowboardStagePanels(
   }, [activeLocale, onRequestRefine, props, selectedSlide.id])
 
   const goToSlide = (slideId: string) => props.onSelect(slideId)
+
+  /**
+   * The one route into the merged preview: pick the variant, then move the
+   * author to the stage that draws it. The Ship stage's "Show on canvas" button
+   * and the Refine canvas's own picker write the same state, so the two can never
+   * disagree about which variant is on screen.
+   */
+  const openVariantPreview = (variantId: string, onGoToStage: (id: FlowboardStageId) => void) => {
+    props.onVariantPreviewChange(variantId)
+    setRefineVariantPreviewId(variantId)
+    onGoToStage('refine')
+  }
 
   const getStagePanel = (id: FlowboardStageId, onGoToStage: (id: FlowboardStageId) => void): ReactNode => {
     if (id === 'intake') {
@@ -323,6 +344,9 @@ export function useFlowboardStagePanels(
           }}
           preflight={preflight}
           onGoToSlide={goToSlide}
+          variants={props.variants}
+          variantPreviewId={refineVariantPreviewId}
+          onVariantPreviewIdChange={setRefineVariantPreviewId}
           copyEditorRequest={copyEditorRequest}
         />
       )
@@ -354,6 +378,8 @@ export function useFlowboardStagePanels(
         onSaveProject={props.onSaveProject}
         onOpenProject={props.onOpenProject}
         onGoToSlide={goToSlide}
+        onOpenVariantPreview={(variantId) => openVariantPreview(variantId, onGoToStage)}
+        activeLocale={activeLocale}
       />
     )
   }

@@ -2013,6 +2013,13 @@ body:has(.flowboard-shell) .app-shell {
 .flowboard-refine__stage {
   display: flex;
   flex: 1;
+  /*
+   * Column, because the stage now holds the variant picker above whichever
+   * surface is showing. With the editable canvas on its own — which is the
+   * default and the common case — there is still exactly one child and this makes
+   * no difference to it.
+   */
+  flex-direction: column;
   min-height: 520px;
   margin-top: 10px;
   overflow: hidden;
@@ -2028,8 +2035,10 @@ body:has(.flowboard-shell) .app-shell {
   background: #f3f3f7;
 }
 
-/* The shared canvas keeps its aspect ratio, so it scales down with the stage. */
-.flowboard-refine__stage .slide-canvas {
+/* The shared canvas keeps its aspect ratio, so it scales down with the stage.
+   Scoped to the editable canvas: the merged preview's canvas keeps the profile's
+   real pixel size and is scaled by a transform, because it is the export. */
+.flowboard-refine__stage > .editor-workspace .slide-canvas {
   width: min(342px, 100%);
 }
 
@@ -2600,6 +2609,369 @@ body:has(.flowboard-shell) .app-shell {
   background: var(--soft, #f7f7fa);
   color: #3b3a45;
   font-size: var(--type-meta);
+}
+
+.ship-variant__actions {
+  flex: 0 0 100%;
+}
+
+/*
+ * The export manifest.
+ *
+ * A table, not a grid of cards: every row carries the same five short facts and
+ * the reader is comparing them down a column, which is what a table is for. It
+ * scrolls sideways on a narrow rail rather than wrapping a filename onto three
+ * lines, because a wrapped filename is no longer recognisable as the thing that
+ * will land in the bundle.
+ */
+.ship-manifest {
+  margin-top: 8px;
+  overflow-x: auto;
+}
+
+.ship-manifest__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--type-meta);
+}
+
+.ship-manifest__table th,
+.ship-manifest__table td {
+  padding: 5px 10px 5px 0;
+  text-align: left;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.ship-manifest__table thead th {
+  border-bottom: 1px solid var(--line, #e5e4ea);
+  color: var(--flow-text-muted, #5f5e6a);
+  font-weight: 700;
+}
+
+.ship-manifest__table tbody tr + tr th,
+.ship-manifest__table tbody tr + tr td {
+  border-top: 1px solid #f2f2f6;
+}
+
+.ship-manifest__table tbody th {
+  font-weight: 400;
+}
+
+.ship-manifest__table code {
+  color: #3b3a45;
+  font-size: var(--type-meta);
+  white-space: nowrap;
+}
+
+/*
+ * The merged per-variant preview on the Refine canvas.
+ *
+ * The one job of this surface is to be unmistakably not the editable canvas. A
+ * dashed frame where the editable one has a solid hairline, a recessed ground
+ * rather than the canvas grey, and one accent on the badge — nothing else. A
+ * read-only surface that reads as editable is worse than no preview: the author
+ * drags, nothing moves, and the whole feature looks broken.
+ *
+ * The frame carries the canvas's real aspect ratio and the canvas inside it keeps
+ * its real pixel size; a transform does the fitting. Nothing here restyles the
+ * slide, so what is on screen is the export at a different size rather than a
+ * re-laid-out approximation of it.
+ */
+.variant-preview {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px dashed #c9c8d4;
+  border-radius: 10px;
+  background: #fafafd;
+}
+
+.variant-preview[data-variant-preview="read-only"] {
+  border-color: #a9a6c8;
+  border-style: dashed;
+  background: #f7f7fb;
+}
+
+.variant-preview__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding: 10px 12px;
+  border-bottom: 1px dashed #e2e1ea;
+}
+
+.variant-preview__pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.variant-preview__pick .field-label {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.variant-preview__pick .profile-select {
+  flex: 0 1 200px;
+  min-width: 0;
+}
+
+/* The live sentence beside the control. It wraps, and it is the only place the
+   variant's facts are written out in full. */
+.variant-preview__state {
+  display: flex;
+  flex: 1 1 260px;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+  overflow-wrap: anywhere;
+}
+
+.variant-preview__badge {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #ecebf6;
+  color: #3f3d78;
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.variant-preview__body {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: flex-start;
+  padding: 14px 12px;
+}
+
+/* The frame sets the aspect ratio; the canvas inside it is the profile's real
+   pixel size, scaled to fit. overflow: hidden is the clip that keeps a scaled
+   canvas inside its own box. */
+.variant-preview__frame {
+  position: relative;
+  flex: 0 1 342px;
+  width: 100%;
+  max-width: 342px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #eeeef3;
+}
+
+.variant-preview__canvas {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform-origin: center;
+  box-shadow: 0 6px 20px rgba(36, 35, 45, 0.12);
+}
+
+.variant-preview__meta {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.variant-preview__meta .flowboard-record {
+  margin-top: 0;
+}
+
+.variant-preview__file {
+  font-size: var(--type-meta);
+  overflow-wrap: anywhere;
+}
+
+.variant-preview__stepper {
+  flex: 1 1 220px;
+}
+
+.variant-preview__deck {
+  padding: 12px;
+  margin: 0;
+}
+
+/*
+ * The store listing preview.
+ *
+ * Three bands rather than a grid of cards: what the surface is, what this set
+ * contains, and the leading tiles. The tiles are the cheap thumbnail component
+ * dressed to the target's own proportions, so a headline that wraps to three
+ * lines cannot resize the row and shift everything under it. The marks are two
+ * dots rather than two icons, because presence is a fact and not an action.
+ *
+ * One accent, and it is the same accent the variant rows already use. Nothing
+ * here introduces a colour the review list above has not already used.
+ */
+.store-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.store-preview__facts {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-top: 1px solid var(--line, #e5e4ea);
+}
+
+.store-preview__facts .flowboard-record__row {
+  align-items: start;
+  gap: 12px;
+}
+
+.store-preview__facts dt {
+  flex: 0 0 168px;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.store-preview__facts dd {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.store-preview__legend {
+  margin: 0;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+}
+
+/* The leading row. Flex-wrap rather than a grid, because the count comes from
+   the listing catalog and changes with the profile rather than with the layout. */
+.store-preview__leading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.store-preview__leading > li {
+  flex: 0 1 132px;
+  min-width: 0;
+}
+
+/* The tile's frame is the target's own proportions, handed in as a custom
+   property, so a landscape target shows a landscape tile and a phone target a
+   phone one without a second rule. */
+.store-preview__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  aspect-ratio: var(--store-preview-aspect, 1125 / 2436);
+  margin: 0;
+  min-width: 0;
+}
+
+.store-preview__tile .flowboard-thumb {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.store-preview__caption {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* A headline wraps rather than overflowing: the tile has a fixed width and the
+   text is not trusted to be shorter than it. */
+.store-preview__headline {
+  min-width: 0;
+  color: var(--flow-text, #24232d);
+  font-size: var(--type-meta);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.store-preview__marks {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.store-preview__mark {
+  color: #9b9aa6;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.store-preview__mark.is-on {
+  color: var(--accent, #5b4cf0);
+}
+
+.store-preview__file {
+  min-width: 0;
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+  overflow-wrap: anywhere;
+}
+
+.store-preview__rest {
+  border-top: 1px solid var(--line, #e5e4ea);
+  padding-top: 10px;
+}
+
+.store-preview__rest-title {
+  margin: 0 0 6px;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.store-preview__rest-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.store-preview__rest-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-height: var(--row-min);
+  min-width: 0;
+}
+
+.store-preview__rest-name {
+  flex: 0 0 72px;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.store-preview__rest-headline {
+  flex: 1 1 160px;
+  min-width: 0;
+  color: var(--flow-text, #24232d);
+  font-size: var(--type-meta);
+  overflow-wrap: anywhere;
 }
 
 /* The rail's own extras */
