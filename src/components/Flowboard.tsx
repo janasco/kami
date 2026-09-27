@@ -11,10 +11,13 @@ import {
 } from '../lib/flowboardRail'
 import type { EditorMode } from '../lib/editorMode'
 import type { BulkSlideAction } from '../lib/flowboardBulkEdit'
+import type { LayerArrangeAction } from '../lib/layerArrange'
 import type { SlideTextField } from '../lib/localization'
-import type { ExportPreflightResult } from '../lib/exportPreflight'
+import type { KamiCapturePayload } from '../lib/screenshotDrop'
+import type { ExportPreflightResult, PreflightLayerBoundsBySlide } from '../lib/exportPreflight'
+import type { ExportEntry, ExportPlan } from '../lib/exportPlan'
 import type { ProjectTemplate } from '../lib/projectTemplates'
-import type { CanvasMode, ExportProfile, ExportProfileId, LayerId, LocaleId, Slide, SlideTransform } from '../types'
+import type { CanvasMode, DeviceFrameId, ExportProfile, ExportProfileId, LayerId, LocaleId, OutputVariant, ScreenshotFit, Slide, SlideTransform } from '../types'
 import type { ExportStatus, PersistenceStatus } from './TopToolbar'
 import type { TemplateApplyMode } from './TemplatePicker'
 import { FlowboardRightRail } from './flowboard/FlowboardRightRail'
@@ -72,8 +75,28 @@ export interface FlowboardProps {
     position: Pick<SlideTransform, 'x' | 'y'>,
     mergeKey: string,
   ) => void
+  /**
+   * Measured layer boxes for every slide, in export profile pixels and relative
+   * to each canvas. Empty until the export stage has been measured, which is why
+   * the arrange controls disable themselves rather than guessing.
+   */
+  layerBounds: PreflightLayerBoundsBySlide
+  /** Applies one align, distribute, or stacking action in a single undo step. */
+  onArrange: (action: LayerArrangeAction) => void
   onImportScreenshot: (slideId?: string) => void
   onImportFiles: (files: File[]) => void
+  /**
+   * Image files dropped on one slide, from a capture card, a deck tile, or the
+   * device placeholder. Resolves to the notice for the drop so a surface can
+   * state the outcome where the drop happened, and applies the whole drop as a
+   * single undoable change.
+   */
+  onDropFilesOnSlide: (slideId: string, files: File[]) => Promise<string>
+  /**
+   * A capture dragged from one slide card onto another. Returns the notice for
+   * that copy, which is why it needs no read: nothing has to be decoded first.
+   */
+  onDropCaptureOnSlide: (slideId: string, capture: KamiCapturePayload) => string
   onOpenScreenshotImport: () => void
   onImportAppIcon: () => void
   onRemoveAppIcon: () => void
@@ -92,6 +115,36 @@ export interface FlowboardProps {
   profile: ExportProfile
   onProfileChange: (profileId: ExportProfileId) => void
   preflight: ExportPreflightResult
+  /**
+   * The deck's output variants, in document order. A deck with one default
+   * variant always has exactly one here, so a stage never has to handle "no
+   * variants" as a separate case.
+   */
+  variants: OutputVariant[]
+  /** Which variant the preview surfaces are drawing. Empty means the first. */
+  activeVariantId: string
+  /** What this profile's enabled variants will write, in ZIP order. */
+  exportEntries: ExportEntry[]
+  /** The variant that refuses to export, when one does. */
+  exportBlockedVariant: ExportPlan['blocked']
+  onVariantPreviewChange: (variantId: string) => void
+  onVariantProfileChange: (variantId: string, profileId: ExportProfileId) => void
+  onVariantToggleEnabled: (variantId: string) => void
+  onVariantRename: (variantId: string, name: string) => void
+  onVariantAdd: () => void
+  onVariantRemove: (variantId: string) => void
+  /**
+   * One device field for one slide of one variant. `undefined` clears the field
+   * and the slide's own value takes over again.
+   */
+  onVariantOverrideChange: (
+    variantId: string,
+    slideId: string,
+    field: 'deviceFrameId' | 'showDeviceStatusBar' | 'screenshotFit',
+    value: DeviceFrameId | boolean | ScreenshotFit | undefined,
+  ) => void
+  /** Opens the picker for one slide of one variant's own capture. */
+  onVariantCaptureChange: (variantId: string, slideId: string) => void
   onExport: () => void
   exportStatus: ExportStatus
   exportDetail: string

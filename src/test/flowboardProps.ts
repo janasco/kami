@@ -1,5 +1,7 @@
 import { createDemoProject } from '../lib/demoProject'
 import { runExportPreflight } from '../lib/exportPreflight'
+import { planExportEntries } from '../lib/exportPlan'
+import { createDefaultOutputVariant } from '../lib/deviceVariants'
 import { exportProfiles } from '../data'
 import type { FlowboardProps } from '../components/Flowboard'
 
@@ -16,10 +18,28 @@ const noop = () => undefined
 export const makeFlowboardProps = (overrides: Partial<FlowboardProps> = {}): FlowboardProps => {
   const demo = createDemoProject()
   const profile = exportProfiles[0]
+  /*
+   * The one default variant, derived the same way the App derives it, so a shell
+   * test exercises the same shape the editor renders rather than a fixture that
+   * can drift from it.
+   */
+  const variants = [createDefaultOutputVariant({
+    slideIds: demo.slides.map((slide) => slide.id),
+    locale: demo.activeLocale,
+    themeId: demo.slides[0]?.theme ?? 'midnight',
+    exportProfileId: demo.selectedExportProfileId,
+  })]
+  const exportPlan = planExportEntries({
+    slides: demo.slides,
+    variants,
+    profileId: profile.id,
+    requiresScreenshot: true,
+  })
   const preflight = runExportPreflight({
     profile,
     slides: demo.slides,
     activeLocale: 'en-US',
+    variants,
   })
   const selectedSlide = demo.slides[0]
 
@@ -50,8 +70,12 @@ export const makeFlowboardProps = (overrides: Partial<FlowboardProps> = {}): Flo
     selectedLayerId: 'headline',
     onLayerSelect: noop,
     onLayerTransformChange: noop,
+    layerBounds: {},
+    onArrange: noop,
     onImportScreenshot: noop,
     onImportFiles: noop,
+    onDropFilesOnSlide: async () => 'Nothing was placed.',
+    onDropCaptureOnSlide: () => 'Nothing was placed.',
     onOpenScreenshotImport: noop,
     onImportAppIcon: noop,
     onRemoveAppIcon: noop,
@@ -70,6 +94,18 @@ export const makeFlowboardProps = (overrides: Partial<FlowboardProps> = {}): Flo
     profile,
     onProfileChange: noop,
     preflight,
+    variants,
+    activeVariantId: variants[0].id,
+    exportEntries: exportPlan.entries,
+    exportBlockedVariant: exportPlan.blocked,
+    onVariantPreviewChange: noop,
+    onVariantProfileChange: noop,
+    onVariantToggleEnabled: noop,
+    onVariantRename: noop,
+    onVariantAdd: noop,
+    onVariantRemove: noop,
+    onVariantOverrideChange: noop,
+    onVariantCaptureChange: noop,
     onExport: noop,
     exportStatus: 'idle',
     exportDetail: '',

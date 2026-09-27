@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { getLayout, getTheme, sanitizeLayerOpacity, slideLayerLabels } from '../data'
+import { getBackgroundFillStyle, resolveBackgroundFill } from '../lib/backgroundFill'
 import { getDeviceFramePreset, getDeviceFrameStyle } from '../lib/devicePresets'
+import { describeCanvasGuides, untransformRect, type CanvasSize, type LayerRect } from '../lib/layerGeometry'
+import { layerOrderZIndex } from '../lib/layerOrder'
+import { nudgeMergeKey, nudgePayload, type TextDirection } from '../lib/layerNudge'
 import { getSlideText } from '../lib/localization'
+import type { KamiCapturePayload } from '../lib/screenshotDrop'
 import type {
   CanvasMode,
   ExportProfile,
@@ -51,6 +56,18 @@ export interface SlideCanvasProps {
   exportTotal: number
   profile: ExportProfile
   locale: LocaleId
+  /**
+   * Image files dropped on a slide's empty aperture. Optional so the export
+   * stage and every other renderer of this canvas can leave it out.
+   */
+  onDropFilesOnSlide?: (slideId: string, files: File[]) => void
+  /** A capture dragged from another slide onto a slide's empty aperture. */
+  onDropCaptureOnSlide?: (slideId: string, capture: KamiCapturePayload) => void
+  /**
+   * Draws the canvas guides over the artwork. Editor-only: the export stage never
+   * asks for them, and nothing about them reaches an exported PNG.
+   */
+  showGuides?: boolean
 }
 
 interface SlideRendererProps {
@@ -70,6 +87,9 @@ interface SlideRendererProps {
     position: Pick<SlideTransform, 'x' | 'y'>,
     mergeKey: string,
   ) => void
+  onDropFiles?: (slideId: string, files: File[]) => void
+  onDropCapture?: (slideId: string, capture: KamiCapturePayload) => void
+  showGuides?: boolean
 }
 
 interface CompositionDragState {
@@ -89,6 +109,22 @@ interface LayerDragState extends CompositionDragState {
 
 const DRAG_THRESHOLD_PX = 4
 const interactiveSelector = 'button, input, textarea, select, a, [contenteditable="true"]'
+
+/**
+ * A keyboard event from either a React handler or a window listener.
+ *
+ * The nudge has to work when a layer has focus and when nothing does, and the
+ * two arrive as different event types. This is the intersection both satisfy.
+ */
+type NudgeSourceEvent = {
+  key: string
+  shiftKey: boolean
+  altKey: boolean
+  ctrlKey: boolean
+  metaKey: boolean
+  target: EventTarget | null
+  currentTarget: EventTarget | null
+}
 
 function isInteractiveTarget(target: EventTarget | null) {
   return target instanceof Element && target.closest(interactiveSelector) !== null
@@ -129,6 +165,88 @@ const layerStyle = (
   opacity: sanitizeLayerOpacity(settings.opacity),
 } as unknown as CSSProperties)
 
+/** The subset of a keyboard event the nudge resolver reads. */
+const nudgeEventFrom = (event: NudgeSourceEvent) => ({
+  key: event.key,
+  shiftKey: event.shiftKey,
+  altKey: event.altKey,
+  ctrlKey: event.ctrlKey,
+  metaKey: event.metaKey,
+  targetTagName: (event.target as HTMLElement | null)?.tagName ?? null,
+})
+
+/** Reading direction of a slide, which mirrors the horizontal nudge keys. */
+const localeDirection = (locale: LocaleId): TextDirection => (locale === 'ar-SA' ? 'rtl' : 'ltr')
+
+/**
+ * Measures a layer's untransformed box against its own canvas.
+ *
+ * `element` is the layer, or null when the key arrived with focus elsewhere, in
+ * which case the layer is looked up inside the nearest canvas. The canvas falls
+ * back to the export profile when there is no live box to measure, which keeps a
+ * nudge working before the canvas has been laid out: it simply skips the clamp.
+ */
+const measureLayerBase = (
+  element: HTMLElement | null,
+  layerId: LayerId,
+  transform: Pick<SlideTransform, 'x' | 'y'>,
+  fallback: CanvasSize,
+): { canvas: CanvasSize; base: LayerRect | null } => {
+  const canvasElement = element?.closest<HTMLElement>('.slide-canvas') ?? null
+  const canvasRect = canvasElement?.getBoundingClientRect()
+  if (!canvasRect || canvasRect.width <= 0 || canvasRect.height <= 0) {
+    return { canvas: fallback, base: null }
+  }
+
+  const canvas: CanvasSize = { width: canvasRect.width, height: canvasRect.height }
+  const layerElement = element
+    ?? canvasElement?.querySelector<HTMLElement>(`[data-layer-id="${layerId}"]`)
+    ?? null
+  const layerRect = layerElement?.getBoundingClientRect()
+  if (!layerRect) return { canvas, base: null }
+
+  const measured: LayerRect = {
+    left: layerRect.left - canvasRect.left,
+    top: layerRect.top - canvasRect.top,
+    right: layerRect.right - canvasRect.left,
+    bottom: layerRect.bottom - canvasRect.top,
+  }
+  return { canvas, base: untransformRect(measured, transform, canvas) }
+}
+
+/**
+ * Commits one keyboard nudge for a layer and reports whether the key was one.
+ *
+ * The focused layer and the window listener that covers a canvas with nothing
+ * focused both call this, so the rules about which keys nudge, which tags own
+ * their own arrows, and where the canvas edge stops a layer exist once.
+ */
+const commitLayerNudge = (
+  slide: Slide,
+  layerId: LayerId,
+  event: NudgeSourceEvent,
+  element: HTMLElement | null,
+  direction: TextDirection,
+  profile: ExportProfile,
+  onLayerTransformChange: SlideCanvasProps['onLayerTransformChange'] | undefined,
+): boolean => {
+  if (!onLayerTransformChange || !slide.layerSettings[layerId]?.visible) return false
+  const likeEvent = nudgeEventFrom(event)
+  const mergeKey = nudgeMergeKey(slide.id, layerId, likeEvent)
+  if (mergeKey === null) return false
+
+  const transform = slide.layerTransforms[layerId]
+  const { canvas, base } = measureLayerBase(element, layerId, transform, {
+    width: profile.width,
+    height: profile.height,
+  })
+  const payload = nudgePayload({ transform, event: likeEvent, direction, canvas, base })
+  if (!payload) return false
+
+  onLayerTransformChange(slide.id, layerId, payload.position, mergeKey)
+  return true
+}
+
 export function SlideRenderer({
   slide,
   slideNumber,
@@ -141,6 +259,9 @@ export function SlideRenderer({
   selectedLayerId,
   onLayerSelect,
   onLayerTransformChange,
+  onDropFiles,
+  onDropCapture,
+  showGuides = false,
 }: SlideRendererProps) {
   const theme = getTheme(slide.theme)
   const layout = getLayout(slide.layout)
@@ -157,10 +278,37 @@ export function SlideRenderer({
     position: Pick<SlideTransform, 'x' | 'y'>
   } | null>(null)
   const [backgroundImageFailed, setBackgroundImageFailed] = useState(false)
+  /**
+   * The background image's real intrinsic size, measured when it loads.
+   *
+   * The stored size is only a hint, and a hand-edited project can claim any
+   * aspect it likes, so the measured value wins as soon as there is one. This is
+   * local state on purpose: it corrects how the canvas draws without writing
+   * back into the project behind the author's back.
+   */
+  const [backgroundIntrinsicSize, setBackgroundIntrinsicSize] = useState<{ width: number; height: number } | null>(null)
 
   useEffect(() => {
     setBackgroundImageFailed(false)
+    setBackgroundIntrinsicSize(null)
   }, [slide.backgroundImage?.dataUrl])
+
+  /**
+   * The whole background fill, resolved to CSS custom properties.
+   *
+   * The renderer never branches on the fill kind. Everything visual is a
+   * variable the stylesheet reads, which is the only way the editor preview and
+   * the export stage can be guaranteed to draw the same canvas from the same
+   * code path.
+   */
+  const backgroundFill = resolveBackgroundFill(slide.backgroundFill)
+  const backgroundFillStyle = getBackgroundFillStyle({
+    fill: backgroundFill,
+    focalPoint: slide.backgroundFocalPoint,
+    themeId: slide.theme,
+    intrinsicSize: backgroundIntrinsicSize ?? slide.backgroundImage,
+    profileAspectRatio: profile.width / profile.height,
+  })
 
   const startCompositionDragging = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (
@@ -305,7 +453,20 @@ export function SlideRenderer({
           event.preventDefault()
           onLayerSelect?.(layerId)
           onSelect?.(slide.id)
+          return
         }
+        // A nudge only applies to the layer the tray is already editing, so an
+        // arrow on some other layer does not silently move the wrong thing.
+        if (selectedLayerId !== layerId) return
+        if (commitLayerNudge(
+          slide,
+          layerId,
+          event,
+          event.currentTarget as HTMLElement,
+          localeDirection(locale),
+          profile,
+          onLayerTransformChange,
+        )) event.preventDefault()
       },
     }
   }
@@ -315,10 +476,28 @@ export function SlideRenderer({
     slide.layerSettings[layerId],
     layerDragPosition?.layerId === layerId ? layerDragPosition.position : null,
   )
+
+  /**
+   * A custom stacking order is the only thing that overrides the stylesheet
+   * `z-index`, and it overrides it inside the content wrapper's own stacking
+   * context. A slide without an order gets no inline value at all, so nothing
+   * about the existing appearance depends on this.
+   */
+  const layerStyleFor = (layerId: LayerId): CSSProperties => {
+    const zIndex = layerOrderZIndex(slide.layerOrder, layerId)
+    return zIndex === undefined
+      ? transformForLayer(layerId)
+      : { ...transformForLayer(layerId), zIndex }
+  }
+
   const isDragging = compositionDragPosition !== null || layerDragPosition !== null
+  const guides = describeCanvasGuides({ width: profile.width, height: profile.height })
+  const guidesVisible = showGuides && !exportMode
 
   return (
     <div
+      data-slide-id={slide.id}
+      data-background-fill={backgroundFill.kind}
       className={`slide-canvas slide-canvas--${theme.id} slide-canvas--${layout.id} slide-canvas--device-${deviceFrame.id} slide-canvas--orientation-${profile.orientation} slide-canvas--${profile.deviceClass}${isDragging ? ' is-dragging' : ''}${exportMode ? ' slide-canvas--export' : ''}`}
       dir={locale === 'ar-SA' ? 'rtl' : 'ltr'}
       onPointerDown={startCompositionDragging}
@@ -335,6 +514,7 @@ export function SlideRenderer({
         '--theme-background': theme.background ?? theme.colors[0],
         '--theme-text': theme.text ?? '#ffffff',
         '--theme-accent': theme.accent ?? theme.colors[1],
+        ...backgroundFillStyle,
         '--slide-transform-x': `${compositionDragPosition?.x ?? slide.transform.x}%`,
         '--slide-transform-y': `${compositionDragPosition?.y ?? slide.transform.y}%`,
         '--slide-transform-scale': slide.transform.scale,
@@ -356,7 +536,7 @@ export function SlideRenderer({
         <div
           className={layerClassName('background-image', 'canvas-background-image')}
           data-layer-id="background-image"
-          style={transformForLayer('background-image')}
+          style={layerStyleFor('background-image')}
           {...layerInteractionProps('background-image')}
         >
           {slide.backgroundImage && !backgroundImageFailed && (
@@ -365,6 +545,12 @@ export function SlideRenderer({
               alt={`Background image for slide ${slideNumber}`}
               draggable={false}
               onError={() => setBackgroundImageFailed(true)}
+              onLoad={(event) => {
+                const { naturalWidth, naturalHeight } = event.currentTarget
+                if (naturalWidth > 0 && naturalHeight > 0) {
+                  setBackgroundIntrinsicSize({ width: naturalWidth, height: naturalHeight })
+                }
+              }}
             />
           )}
         </div>
@@ -372,7 +558,7 @@ export function SlideRenderer({
           className={layerClassName('accent-shape', `canvas-accent-shape canvas-accent-shape--${slide.accentShapeStyle.type}`)}
           data-layer-id="accent-shape"
           style={{
-            ...transformForLayer('accent-shape'),
+            ...layerStyleFor('accent-shape'),
             backgroundColor: slide.accentShapeStyle.color,
           }}
           {...layerInteractionProps('accent-shape')}
@@ -381,7 +567,7 @@ export function SlideRenderer({
           <div
             className={layerClassName('app-icon', 'canvas-app-icon')}
             data-layer-id="app-icon"
-            style={transformForLayer('app-icon')}
+            style={layerStyleFor('app-icon')}
             {...layerInteractionProps('app-icon')}
           >
             <img
@@ -394,7 +580,7 @@ export function SlideRenderer({
         <div
           className={layerClassName('kicker', 'canvas-kicker')}
           data-layer-id="kicker"
-          style={transformForLayer('kicker')}
+          style={layerStyleFor('kicker')}
           {...layerInteractionProps('kicker')}
         >
           <span className="canvas-kicker__line" />
@@ -403,7 +589,7 @@ export function SlideRenderer({
         <h1
           className={layerClassName('headline', 'canvas-headline')}
           data-layer-id="headline"
-          style={transformForLayer('headline')}
+          style={layerStyleFor('headline')}
           {...layerInteractionProps('headline')}
         >
           {text.title.split('\n').map((line, index) => (
@@ -414,7 +600,7 @@ export function SlideRenderer({
           <p
             className={layerClassName('supporting-text', 'canvas-supporting-text')}
             data-layer-id="supporting-text"
-            style={transformForLayer('supporting-text')}
+            style={layerStyleFor('supporting-text')}
             {...layerInteractionProps('supporting-text')}
           >
             {text.subtitle}
@@ -426,15 +612,23 @@ export function SlideRenderer({
             className={layerClassName('screenshot', 'phone-wrap')}
             data-layer-id="screenshot"
             data-device-frameless={deviceFrame.family === 'frameless' ? 'true' : 'false'}
-            style={{ ...transformForLayer('screenshot'), ...getDeviceFrameStyle(deviceFrame.id) }}
+            style={{ ...layerStyleFor('screenshot'), ...getDeviceFrameStyle(deviceFrame.id) }}
             {...layerInteractionProps('screenshot')}
           >
             <div className="phone">
               <DeviceAperture
                 slide={slide}
+                slideId={slide.id}
                 screenshot={slide.screenshot}
                 slideNumber={slideNumber}
                 onImport={onImport}
+                /*
+                 * The export stage renders every slide, placeholder included, so
+                 * the drop handlers are withheld there: an exported PNG is the
+                 * artwork alone, and nothing on it accepts a file.
+                 */
+                onDropFiles={exportMode ? undefined : onDropFiles}
+                onDropCapture={exportMode ? undefined : onDropCapture}
               />
             </div>
             <div className="phone-shadow" />
@@ -445,13 +639,46 @@ export function SlideRenderer({
       <div
         className={layerClassName('footer', 'canvas-footer')}
         data-layer-id="footer"
-        style={transformForLayer('footer')}
+        style={layerStyleFor('footer')}
         {...layerInteractionProps('footer')}
       >
         <span>kami studio</span>
         <span className="canvas-footer__dot">✦</span>
         <span>Made for the moment</span>
       </div>
+
+      {/*
+        Authoring guides. They sit above the artwork, take no pointer, and are
+        skipped entirely in the export stage, so an exported PNG is the artwork
+        alone. The inline `pointer-events` is the part that has to hold even if a
+        stylesheet fails to load.
+      */}
+      {guidesVisible && (
+        <div
+          className="canvas-guides"
+          data-canvas-guides=""
+          style={{ pointerEvents: 'none' }}
+          aria-hidden="true"
+        >
+          <div
+            className="canvas-guide-safe-area"
+            style={{
+              top: `${guides.safeAreaInset.top}%`,
+              right: `${guides.safeAreaInset.right}%`,
+              bottom: `${guides.safeAreaInset.bottom}%`,
+              left: `${guides.safeAreaInset.left}%`,
+            }}
+          />
+          {guides.lines.map((line) => (
+            <div
+              key={line.id}
+              className={`canvas-guide canvas-guide--${line.orientation} canvas-guide--${line.kind}`}
+              data-guide={line.id}
+              style={line.orientation === 'vertical' ? { left: `${line.positionPercent}%` } : { top: `${line.positionPercent}%` }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -478,8 +705,12 @@ export function SlideCanvas({
   exportTotal,
   profile,
   locale,
+  onDropFilesOnSlide,
+  onDropCaptureOnSlide,
+  showGuides = false,
 }: SlideCanvasProps) {
   const connectedSlideRefs = useRef(new Map<string, HTMLDivElement>())
+  const stageRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (mode !== 'connected') return
@@ -489,6 +720,35 @@ export function SlideCanvas({
       inline: 'center',
     })
   }, [mode, selectedId, slides.length])
+
+  /**
+   * Nudges the selected layer from anywhere on the page.
+   *
+   * A layer that has focus handles its own arrows, and it prevents the default
+   * when it does, so the `defaultPrevented` guard keeps the two paths from
+   * nudging twice. This listener exists for the far more common case: the author
+   * has just dragged with the mouse and the focus is still on the canvas.
+   */
+  useEffect(() => {
+    const handleNudgeKey = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      const element = stageRef.current
+        ?.querySelector<HTMLElement>(`.slide-canvas[data-slide-id="${selectedId}"] [data-layer-id="${selectedLayerId}"]`)
+        ?? null
+      if (commitLayerNudge(
+        selectedSlide,
+        selectedLayerId,
+        event,
+        element,
+        localeDirection(locale),
+        profile,
+        onLayerTransformChange,
+      )) event.preventDefault()
+    }
+
+    window.addEventListener('keydown', handleNudgeKey)
+    return () => window.removeEventListener('keydown', handleNudgeKey)
+  }, [locale, onLayerTransformChange, profile, selectedId, selectedLayerId, selectedSlide])
 
   const selectSlideFromKeyboard = (event: KeyboardEvent<HTMLDivElement>, id: string) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
@@ -512,7 +772,7 @@ export function SlideCanvas({
       </div>
 
       {mode === 'isolated' ? (
-        <div className="canvas-stage">
+        <div className="canvas-stage" ref={stageRef}>
           <SlideRenderer
             slide={selectedSlide}
             slideNumber={selectedIndex + 1}
@@ -524,10 +784,13 @@ export function SlideCanvas({
             selectedLayerId={selectedLayerId}
             onLayerSelect={onLayerSelect}
             onLayerTransformChange={onLayerTransformChange}
+            onDropFiles={onDropFilesOnSlide}
+            onDropCapture={onDropCaptureOnSlide}
+            showGuides={showGuides}
           />
         </div>
       ) : (
-        <div className="canvas-stage canvas-stage--connected" aria-label="Connected slide canvas">
+        <div className="canvas-stage canvas-stage--connected" aria-label="Connected slide canvas" ref={stageRef}>
           <div className="connected-strip" role="list">
             {slides.map((slide, index) => (
               <div
@@ -559,6 +822,9 @@ export function SlideCanvas({
                   selectedLayerId={selectedId === slide.id ? selectedLayerId : undefined}
                   onLayerSelect={onLayerSelect}
                   onLayerTransformChange={onLayerTransformChange}
+                  onDropFiles={onDropFilesOnSlide}
+                  onDropCapture={onDropCaptureOnSlide}
+                  showGuides={showGuides}
                 />
               </div>
             ))}

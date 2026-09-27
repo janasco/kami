@@ -1012,6 +1012,61 @@ body:has(.flowboard-shell) .app-shell {
   margin-top: 12px;
 }
 
+/*
+ * Capture drop targets.
+ *
+ * One rule set for the three surfaces that accept a capture drop: a Frame
+ * contact-sheet card, an Intake deck tile, and the device placeholder. The
+ * wrapper is a plain positioned box, so the card, the tile, and the artwork keep
+ * their own appearance and only the target is lit. The ring is a thick outline
+ * with a halo rather than a background tint, which is what makes it readable
+ * over a thumbnail, and it is the ring the focus state already uses, so a drop
+ * target and a keyboard focus read as the same kind of affordance.
+ *
+ * Nothing here changes pointer behaviour: the wrapper takes no pointer capture,
+ * so dragging a layer across a card or a tile still drags the layer.
+ */
+.flowboard-drop-target {
+  position: relative;
+  border-radius: 12px;
+}
+
+.flowboard-drop-target.is-drop-active {
+  outline: 3px solid var(--flow-focus, #6558e8);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px rgba(101, 88, 232, 0.24);
+}
+
+/* The source of a card-to-card drag, so the copy is visible at both ends. */
+.flowboard-drop-target.is-drag-source {
+  opacity: 0.6;
+}
+
+.flowboard-drop-hint {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: var(--purple, #6558e8);
+  color: #ffffff;
+  font-size: var(--type-meta);
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.flowboard-drop-note {
+  margin: 10px 0 0;
+}
+
+.flowboard-mini-strip__item {
+  padding: 4px;
+  border-radius: 12px;
+}
+
 .flowboard-template-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(184px, 1fr));
@@ -2001,6 +2056,25 @@ body:has(.flowboard-shell) .app-shell {
   gap: 10px;
 }
 
+/* A titled run of controls inside the tray, so the background fill does not read
+   as part of the transform fields above it. */
+.flowboard-tray__group {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line, #e5e4ea);
+}
+
+.flowboard-tray__group > .eyebrow {
+  display: block;
+  margin-bottom: 10px;
+}
+
+/* The guides switch sits in the stage heading, next to the drawer toggle. */
+.flowboard-guides-toggle {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .flowboard-tray .layer-picker {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
@@ -2364,6 +2438,168 @@ body:has(.flowboard-shell) .app-shell {
 
 .flowboard-ship-issues li.is-blocking > span {
   color: #b4463f;
+}
+
+/*
+ * Ship stage: device variants.
+
+ * A flat list of rows separated by hairlines, in the same record idiom as
+ * `.flowboard-record`, rather than a card per variant. The author is comparing
+ * a few short facts per variant, and a card inside the panel would add a
+ * container that carries no information. One accent is the active row's left
+ * rule; nothing here introduces a second colour beyond the status greens and
+ * reds the review list already uses.
+ */
+.ship-variants {
+  margin: 14px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--line, #e5e4ea);
+  list-style: none;
+}
+
+.ship-variant {
+  padding: 12px 0 12px 12px;
+  border-bottom: 1px solid #f0f0f4;
+  border-left: 2px solid transparent;
+}
+
+.ship-variant.is-active {
+  border-left-color: var(--accent, #5b4cf0);
+}
+
+.ship-variant.is-off {
+  opacity: 0.66;
+}
+
+.ship-variant__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.ship-variant__name {
+  display: block;
+  min-width: 0;
+  flex: 0 1 180px;
+}
+
+.ship-variant__input {
+  width: 100%;
+  min-height: var(--control-input);
+  padding: 5px 8px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 7px;
+  background: #ffffff;
+  color: inherit;
+  font: inherit;
+  font-size: var(--type-body);
+  font-weight: 600;
+}
+
+.ship-variant__input:focus-visible {
+  outline: 2px solid var(--accent, #5b4cf0);
+  outline-offset: 1px;
+}
+
+.ship-variant__summary {
+  flex: 1 1 200px;
+  min-width: 0;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.ship-variant__detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e6e6ec;
+}
+
+.ship-variant__detail .flowboard-export-grid__form {
+  flex: 0 1 240px;
+}
+
+.ship-variant__slides {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ship-variant__slide {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-height: var(--row-min);
+}
+
+.ship-variant__slide-name {
+  flex: 0 0 108px;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.ship-variant__slide-state {
+  color: var(--flow-text-faint, #6b6a76);
+  font-size: var(--type-meta);
+}
+
+.profile-select--compact {
+  flex: 0 1 150px;
+  min-height: var(--control-input);
+  padding: 4px 6px;
+  border: 1px solid var(--line, #e5e4ea);
+  border-radius: 7px;
+  background: #ffffff;
+  color: inherit;
+  font: inherit;
+  font-size: var(--type-meta);
+}
+
+.ship-variant__blocked,
+.ship-variant__off {
+  margin: 10px 0 0;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+}
+
+.ship-variant__blocked {
+  color: #b4463f;
+}
+
+.ship-variant__bundle {
+  margin-top: 16px;
+}
+
+.ship-variant__bundle-title {
+  margin: 0 0 6px;
+  color: var(--flow-text-muted, #5f5e6a);
+  font-size: var(--type-meta);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ship-variant__files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ship-variant__files code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--soft, #f7f7fa);
+  color: #3b3a45;
+  font-size: var(--type-meta);
 }
 
 /* The rail's own extras */

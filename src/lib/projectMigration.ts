@@ -2,12 +2,16 @@ import {
   createDefaultAccentShapeStyle,
   createDefaultLayerSettings,
   createDefaultLayerTransforms,
+  DEFAULT_BACKGROUND_FILL,
   DEFAULT_DEVICE_FRAME_ID,
   DEFAULT_SCREENSHOT_FIT,
   defaultShowDeviceStatusBar,
   resolveDeviceFrameId,
   DEFAULT_SLIDE_TRANSFORM,
 } from '../data'
+import { clampFocalPoint, isDefaultFocalPoint } from './backgroundFill'
+import { isKnownDeviceFrameId } from './devicePresets'
+import { resolveScreenshotFit } from './screenshotFit'
 import { validateProjectDocument, validationSummary, type ValidationIssue } from './projectValidation'
 import { PROJECT_VERSION } from './projectValidation'
 
@@ -65,6 +69,15 @@ const applyV1Defaults = (source: JsonRecord): JsonRecord => {
     }
     // Imports must never be cropped without the author choosing it.
     if (slide.screenshotFit === undefined) slide.screenshotFit = DEFAULT_SCREENSHOT_FIT
+    /*
+     * Both background fields are optional, so a project that never had them is
+     * left exactly as it was and the applied-migration notice below is
+     * unchanged. A record that exists but lost its kind is completed rather than
+     * dropped, so a partially hand-edited fill still means something.
+     */
+    if (isRecord(slide.backgroundFill) && slide.backgroundFill.kind === undefined) {
+      slide.backgroundFill.kind = DEFAULT_BACKGROUND_FILL
+    }
     if (slide.transform === undefined) slide.transform = defaultTransform()
     if (!Array.isArray(slide.layers)) return
     const defaults = createDefaultLayerTransforms()
@@ -79,6 +92,16 @@ const applyV1Defaults = (source: JsonRecord): JsonRecord => {
       if (layer.opacity === undefined) layer.opacity = semantic ? defaultSettings[semantic].opacity : 1
       if (layer.visible === undefined) layer.visible = true
       if (semantic === 'accent-shape' && layer.style === undefined) layer.style = createDefaultAccentShapeStyle()
+      /*
+       * A focal point is normalized, so an out-of-range one is clamped here and
+       * a value that lands on the centre is removed again: the document then
+       * carries no record of a framing nobody chose.
+       */
+      if (semantic === 'background-image' && layer.focalPoint !== undefined) {
+        const focalPoint = clampFocalPoint(layer.focalPoint)
+        if (isDefaultFocalPoint(focalPoint)) delete layer.focalPoint
+        else layer.focalPoint = { x: focalPoint.x, y: focalPoint.y }
+      }
     })
   })
 
@@ -88,6 +111,34 @@ const applyV1Defaults = (source: JsonRecord): JsonRecord => {
       if (layout.frame.x === undefined) layout.frame.x = 0
       if (layout.frame.y === undefined) layout.frame.y = 0
     }
+  })
+
+  /*
+   * The output variants, completed rather than created.
+   *
+   * Nothing is added to a document that has no variants, so a project that never
+   * used the feature still goes through the migration unchanged and the
+   * `report.applied` line the user reads stays exactly what it was. Only a record
+   * that is present but incomplete is completed, which is the same rule every
+   * other optional field follows.
+   */
+  if (Array.isArray(document.outputVariants)) document.outputVariants.forEach((variant) => {
+    if (!isRecord(variant)) return
+    if (variant.enabled === undefined) variant.enabled = true
+    if (!Array.isArray(variant.deviceOverrides)) return
+    variant.deviceOverrides.forEach((override) => {
+      if (!isRecord(override)) return
+      /*
+       * A device frame the catalog does not have is only migrated when an older
+       * spelling says so. An unknown name is left for the validator, which
+       * refuses the document rather than quietly drawing a different device.
+       */
+      if (override.deviceFrameId === undefined) return
+      if (isKnownDeviceFrameId(override.deviceFrameId)) {
+        override.deviceFrameId = resolveDeviceFrameId(override.deviceFrameId)
+      }
+      if (override.screenshotFit !== undefined) override.screenshotFit = resolveScreenshotFit(override.screenshotFit)
+    })
   })
 
   return document

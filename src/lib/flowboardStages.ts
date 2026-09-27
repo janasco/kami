@@ -9,15 +9,17 @@
 
 import {
   DEFAULT_ACCENT_SHAPE_STYLE,
+  backgroundFillOptions,
   deviceFramePresets,
   screenshotFitOptions,
   slideLayerIds,
 } from '../data'
+import { resolveBackgroundFill } from './backgroundFill'
 import { isFramelessDeviceId } from './devicePresets'
 import { shouldShowDeviceStatusBar } from './deviceStatusBar'
 import { getSlideText } from './localization'
 import type { ExportPreflightIssue, ExportPreflightResult } from './exportPreflight'
-import type { DeviceFrameId, LocaleId, ScreenshotFit, Slide, SlideTransform } from '../types'
+import type { BackgroundFillKind, DeviceFrameId, LocaleId, ScreenshotFit, Slide, SlideTransform } from '../types'
 
 export type FlowboardStageId = 'intake' | 'frame' | 'story' | 'refine' | 'ship'
 
@@ -136,6 +138,7 @@ export interface FlowboardCaptureSummary {
   deviceName: string
   fitLabel: string
   statusBarLabel: string
+  fillLabel: string
   framed: boolean
 }
 
@@ -145,13 +148,23 @@ export const describeDeviceFrame = (deviceFrameId: DeviceFrameId): string =>
 const describeFit = (fit: ScreenshotFit): string =>
   screenshotFitOptions.find((option) => option.id === fit)?.label ?? 'Contain'
 
-/** Device, fit, and status-bar summary shown on Frame capture cards. */
-export const summarizeCapture = (slide: Pick<Slide, 'deviceFrameId' | 'showDeviceStatusBar' | 'screenshotFit'>): FlowboardCaptureSummary => {
+export const describeBackgroundFillKind = (fill: unknown): string =>
+  backgroundFillOptions.find((option) => option.id === resolveBackgroundFill(fill).kind)?.label ?? 'Theme'
+
+/**
+ * Device, fit, fill, and status-bar summary shown on Frame capture cards.
+ *
+ * The fill belongs here because it is the same decision as the fit: it decides
+ * what the back of the slide is. A card that says "Panoramic" tells the author
+ * more than a card that silently disagrees with the canvas behind it.
+ */
+export const summarizeCapture = (slide: Pick<Slide, 'backgroundFill' | 'deviceFrameId' | 'showDeviceStatusBar' | 'screenshotFit'>): FlowboardCaptureSummary => {
   const framed = !isFramelessDeviceId(slide.deviceFrameId)
   return {
     deviceName: describeDeviceFrame(slide.deviceFrameId),
     fitLabel: describeFit(slide.screenshotFit),
     statusBarLabel: !framed ? 'No frame, no chrome' : shouldShowDeviceStatusBar(slide) ? 'Status bar on' : 'Status bar off',
+    fillLabel: describeBackgroundFillKind(slide.backgroundFill),
     framed,
   }
 }
@@ -195,7 +208,15 @@ export interface FlowboardDeckFacts {
   screenshotFits: ScreenshotFit[]
   /** Distinct status-bar choices across framed slides that carry a capture. */
   statusBarModes: boolean[]
+  /**
+   * Distinct background fills across the deck. Collected over every slide, not
+   * only the ones with a capture: a background is a property of the slide, and a
+   * slide still waiting for its capture can already have a different backdrop
+   * from its neighbours.
+   */
+  backgroundFills: BackgroundFillKind[]
   mixedFraming: boolean
+  mixedBackgroundFill: boolean
   refinedSlideCount: number
   layerIssueCount: number
 }
@@ -218,11 +239,13 @@ export const collectFlowboardDeckFacts = ({ slides, activeLocale, preflight }: F
   const deviceFrameIds = new Set<DeviceFrameId>()
   const screenshotFits = new Set<ScreenshotFit>()
   const statusBarModes = new Set<boolean>()
+  const backgroundFills = new Set<BackgroundFillKind>()
   let captureCount = 0
   let refinedSlideCount = 0
 
   slides.forEach((slide, index) => {
     const slideNumber = index + 1
+    backgroundFills.add(resolveBackgroundFill(slide.backgroundFill).kind)
     if (slide.screenshot) {
       captureCount += 1
       deviceFrameIds.add(slide.deviceFrameId)
@@ -244,7 +267,9 @@ export const collectFlowboardDeckFacts = ({ slides, activeLocale, preflight }: F
     deviceFrameIds: [...deviceFrameIds],
     screenshotFits: [...screenshotFits],
     statusBarModes: [...statusBarModes],
+    backgroundFills: [...backgroundFills],
     mixedFraming: deviceFrameIds.size > 1 || screenshotFits.size > 1 || statusBarModes.size > 1,
+    mixedBackgroundFill: backgroundFills.size > 1,
     refinedSlideCount,
     layerIssueCount: preflight.issues.filter(isRefineIssue).length,
   }
@@ -274,6 +299,10 @@ const evaluateFrame = (facts: FlowboardDeckFacts) => {
   }
   if (facts.mixedFraming) {
     return rollup('attention', 'Device, fit, or status bar choices differ across the deck. Align them or accept the mix.')
+  }
+  if (facts.mixedBackgroundFill) {
+    const fills = facts.backgroundFills.map(describeBackgroundFillKind).join(' and ')
+    return rollup('attention', `Background fills differ across the deck: ${fills}. Align them or accept the mix.`)
   }
   const devices = facts.deviceFrameIds.map(describeDeviceFrame).join(' and ')
   return rollup('ready', `${plural(facts.captureCount, 'capture')} framed with ${devices || 'no device frame'}.`)

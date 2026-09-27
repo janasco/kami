@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { deviceFramePresets, screenshotFitOptions } from '../../data'
 import { isFramelessDeviceId } from '../../lib/devicePresets'
 import { DEFAULT_DEVICE_STATUS_BAR_TIME } from '../../lib/deviceStatusBar'
@@ -9,8 +10,11 @@ import {
   describeSlideCardState,
   type FlowboardSelection,
 } from '../../lib/flowboardSelection'
+import type { KamiCapturePayload } from '../../lib/screenshotDrop'
 import type { DeviceFrameId, ExportProfile, ScreenshotFit, Slide } from '../../types'
+import { BackgroundFillControls } from '../BackgroundFillControls'
 import { BulkActionBar, SlideSelectionSummary, createCardSelectionHandlers } from './SlideSelection'
+import { SlideDropTarget } from './SlideDropTarget'
 import { SlideThumbnail } from './SlideThumbnail'
 
 const idPrefix = 'flowboard-frame'
@@ -32,6 +36,13 @@ interface FrameStageProps {
   bulkNotice: string | null
   onImport: (slideId?: string) => void
   profile: ExportProfile
+  /**
+   * Image files dropped on a capture card. Resolves to the notice for the drop,
+   * so the stage can state the outcome next to the card that was dropped on.
+   */
+  onDropFiles: (slideId: string, files: File[]) => Promise<string>
+  /** A capture dragged from another card onto this one. */
+  onDropCapture: (slideId: string, capture: KamiCapturePayload) => string
 }
 
 /**
@@ -56,12 +67,28 @@ export function FrameStage({
   bulkNotice,
   onImport,
   profile,
+  onDropFiles,
+  onDropCapture,
 }: FrameStageProps) {
+  const [dropNotice, setDropNotice] = useState<string | null>(null)
   const capture = summarizeCapture(selectedSlide)
   const frameless = isFramelessDeviceId(selectedSlide.deviceFrameId)
   const captureRequired = profile.preflight?.requirements.screenshot !== false
   const missing = slides.filter((slide) => !slide.screenshot)
   const selectHintId = `${idPrefix}-select-hint`
+
+  /**
+   * A file drop and a card drag both land here, and both end in the one live
+   * region under the sheet, so the outcome of a drop is stated once instead of
+   * once per card.
+   */
+  const dropFilesOnSlide = (slideId: string, files: File[]) => {
+    void onDropFiles(slideId, files).then(setDropNotice)
+  }
+
+  const dropCaptureOnSlide = (slideId: string, dropped: KamiCapturePayload) => {
+    setDropNotice(onDropCapture(slideId, dropped))
+  }
 
   return (
     <div className="flowboard-stage-body flowboard-frame">
@@ -96,6 +123,10 @@ export function FrameStage({
           onClear={onClearSelection}
         />
 
+        <p className="flowboard-hint flowboard-drop-note" role="status" aria-live="polite">
+          {dropNotice ?? 'Drop images on a card to replace that capture, or drop several to fill the deck in order. Drag a card onto another one to copy its capture.'}
+        </p>
+
         <ul className="flowboard-contact-sheet" role="list" aria-describedby={selectHintId}>
           {slides.map((slide, index) => {
             const summary = summarizeCapture(slide)
@@ -109,33 +140,41 @@ export function FrameStage({
             const handlers = createCardSelectionHandlers(slide.id, onSelect, onToggleSelect)
             return (
               <li key={slide.id} className={card.className} data-selection-state={card.state}>
-                <button
-                  className={`flowboard-capture-card${card.className ? ` ${card.className}` : ''}${slide.screenshot ? '' : ' is-empty'}`}
-                  type="button"
-                  data-selected={card.dataSelected}
-                  data-selection-state={card.state}
-                  onClick={handlers.onClick}
-                  onContextMenu={handlers.onContextMenu}
-                  aria-pressed={card.selected}
-                  aria-current={card.editing ? 'true' : undefined}
-                  aria-describedby={selectHintId}
-                  aria-label={describeSlideCardLabel(
-                    index + 1,
-                    `${slide.screenshotName ?? 'No capture'}. ${summary.deviceName}, ${summary.fitLabel} fit, ${summary.statusBarLabel}.`,
-                    card,
-                  )}
+                <SlideDropTarget
+                  slide={slide}
+                  hint={slide.screenshot ? 'Drop to replace' : 'Drop to add'}
+                  onDropFiles={dropFilesOnSlide}
+                  onDropCapture={dropCaptureOnSlide}
                 >
-                  <span className="flowboard-card__mark" aria-hidden="true">{card.mark}</span>
-                  <SlideThumbnail slide={slide} index={index} variant="capture" />
-                  <span className="flowboard-capture-card__index">{String(index + 1).padStart(2, '0')}</span>
-                  <span className="flowboard-capture-card__meta">
-                    <span className={`flowboard-card__badge${card.editing ? '' : ' is-selected'}`}>{card.badge}</span>
-                    <strong>{slide.screenshotName ?? 'No capture yet'}</strong>
-                    <span>{summary.deviceName}</span>
-                    <span>{summary.fitLabel} fit</span>
-                    <span className={summary.statusBarLabel === 'Status bar on' ? 'is-good' : 'is-muted'}>{summary.statusBarLabel}</span>
-                  </span>
-                </button>
+                  <button
+                    className={`flowboard-capture-card${card.className ? ` ${card.className}` : ''}${slide.screenshot ? '' : ' is-empty'}`}
+                    type="button"
+                    data-selected={card.dataSelected}
+                    data-selection-state={card.state}
+                    onClick={handlers.onClick}
+                    onContextMenu={handlers.onContextMenu}
+                    aria-pressed={card.selected}
+                    aria-current={card.editing ? 'true' : undefined}
+                    aria-describedby={selectHintId}
+                    aria-label={describeSlideCardLabel(
+                      index + 1,
+                      `${slide.screenshotName ?? 'No capture'}. ${summary.deviceName}, ${summary.fitLabel} fit, ${summary.statusBarLabel}, ${summary.fillLabel} background.`,
+                      card,
+                    )}
+                  >
+                    <span className="flowboard-card__mark" aria-hidden="true">{card.mark}</span>
+                    <SlideThumbnail slide={slide} index={index} variant="capture" />
+                    <span className="flowboard-capture-card__index">{String(index + 1).padStart(2, '0')}</span>
+                    <span className="flowboard-capture-card__meta">
+                      <span className={`flowboard-card__badge${card.editing ? '' : ' is-selected'}`}>{card.badge}</span>
+                      <strong>{slide.screenshotName ?? 'No capture yet'}</strong>
+                      <span>{summary.deviceName}</span>
+                      <span>{summary.fitLabel} fit</span>
+                      <span className={summary.statusBarLabel === 'Status bar on' ? 'is-good' : 'is-muted'}>{summary.statusBarLabel}</span>
+                      <span className={summary.fillLabel === 'Theme' ? 'is-muted' : ''}>{summary.fillLabel} background</span>
+                    </span>
+                  </button>
+                </SlideDropTarget>
               </li>
             )
           })}
@@ -223,7 +262,7 @@ export function FrameStage({
             </p>
           </div>
 
-          <div className="flowboard-field">
+          <div className="flowboard-field flowboard-field--wide">
             <span className="field-label">Capture file</span>
             <div className="image-field">
               <div>
@@ -233,6 +272,14 @@ export function FrameStage({
                 {selectedSlide.screenshot ? 'Replace' : 'Import'}
               </button>
             </div>
+          </div>
+
+          <div className="flowboard-field flowboard-field--wide">
+            <BackgroundFillControls
+              slide={selectedSlide}
+              idPrefix="flowboard-frame-background"
+              onUpdate={onUpdate}
+            />
           </div>
         </div>
       </section>

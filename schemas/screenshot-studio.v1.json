@@ -78,6 +78,31 @@
       },
       "additionalProperties": true
     },
+    "backgroundFill": {
+      "type": "object",
+      "properties": {
+        "kind": { "enum": ["theme", "solid", "gradient", "image", "panoramic"] },
+        "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "gradient": {
+          "type": "object",
+          "properties": {
+            "angle": { "type": "number" },
+            "stops": { "type": "array", "items": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" } }
+          },
+          "additionalProperties": true
+        },
+        "blend": { "enum": ["normal", "multiply", "screen", "overlay"] }
+      },
+      "additionalProperties": true
+    },
+    "focalPoint": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": true
+    },
     "scene": {
       "type": "object",
       "required": ["unit", "origin", "coordinateSpace", "width", "height"],
@@ -109,6 +134,7 @@
         "type": { "enum": ["image", "text", "shape"] },
         "textKey": { "type": "string" },
         "assetId": { "$ref": "#/$defs/id" },
+        "focalPoint": { "$ref": "#/$defs/focalPoint" },
         "frame": { "$ref": "#/$defs/frame" },
         "zIndex": { "type": "integer" },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
@@ -135,6 +161,7 @@
         "themeId": { "$ref": "#/$defs/id" },
         "deviceFrameId": { "enum": ["iphone", "iphone-se", "iphone-island", "iphone-island-max", "ipad-mini", "ipad-air", "android", "android-pixel", "android-galaxy", "android-tablet", "none", "canvas"] },
         "showDeviceStatusBar": { "type": "boolean" },
+        "backgroundFill": { "$ref": "#/$defs/backgroundFill" },
         "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } }
       },
       "additionalProperties": true
@@ -162,6 +189,46 @@
       },
       "additionalProperties": true
     },
+    "transform": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "scale": { "type": "number", "exclusiveMinimum": 0 },
+        "rotation": { "type": "number" },
+        "widthScale": { "type": "number", "minimum": 0.25, "maximum": 4 },
+        "heightScale": { "type": "number", "minimum": 0.25, "maximum": 4 },
+        "flipX": { "type": "boolean" },
+        "flipY": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "deviceVariantSlideOverride": {
+      "type": "object",
+      "required": ["slideId"],
+      "properties": {
+        "slideId": { "$ref": "#/$defs/id" },
+        "deviceFrameId": { "enum": ["iphone", "iphone-se", "iphone-island", "iphone-island-max", "ipad-mini", "ipad-air", "android", "android-pixel", "android-galaxy", "android-tablet", "none", "canvas"] },
+        "showDeviceStatusBar": { "type": "boolean" },
+        "screenshotFit": { "enum": ["cover", "contain"] },
+        "assetId": { "$ref": "#/$defs/id" },
+        "layerTransforms": {
+          "type": "object",
+          "properties": {
+            "background-image": { "$ref": "#/$defs/transform" },
+            "accent-shape": { "$ref": "#/$defs/transform" },
+            "screenshot": { "$ref": "#/$defs/transform" },
+            "app-icon": { "$ref": "#/$defs/transform" },
+            "headline": { "$ref": "#/$defs/transform" },
+            "supporting-text": { "$ref": "#/$defs/transform" },
+            "kicker": { "$ref": "#/$defs/transform" },
+            "footer": { "$ref": "#/$defs/transform" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
     "outputVariant": {
       "type": "object",
       "required": ["id", "name", "canvasId", "locale", "themeId", "slideIds", "enabled"],
@@ -172,7 +239,9 @@
         "locale": { "type": "string" },
         "themeId": { "$ref": "#/$defs/id" },
         "slideIds": { "type": "array", "items": { "$ref": "#/$defs/id" } },
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean" },
+        "exportProfileId": { "$ref": "#/$defs/id" },
+        "deviceOverrides": { "type": "array", "items": { "$ref": "#/$defs/deviceVariantSlideOverride" } }
       },
       "additionalProperties": true
     },

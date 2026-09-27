@@ -211,6 +211,8 @@ export function useFlowboardStagePanels(
           onOpenProjectFile={props.onOpenProjectFile}
           onOpenScreenshotImport={props.onOpenScreenshotImport}
           onImportScreenshot={() => props.onImportScreenshot()}
+          onDropFiles={props.onDropFilesOnSlide}
+          onDropCapture={props.onDropCaptureOnSlide}
           onOpenTemplates={props.onOpenTemplates}
           templatesDisabled={props.templatesDisabled}
           onApplyTemplate={(template) => props.onApplyTemplate(template, 'new-deck')}
@@ -237,6 +239,8 @@ export function useFlowboardStagePanels(
           bulkNotice={bulkNotice}
           onImport={props.onImportScreenshot}
           profile={profile}
+          onDropFiles={props.onDropFilesOnSlide}
+          onDropCapture={props.onDropCaptureOnSlide}
         />
       )
     }
@@ -285,6 +289,8 @@ export function useFlowboardStagePanels(
             selectedLayerId: props.selectedLayerId,
             onLayerSelect: props.onLayerSelect,
             onLayerTransformChange: props.onLayerTransformChange,
+            onDropFilesOnSlide: props.onDropFilesOnSlide,
+            onDropCaptureOnSlide: props.onDropCaptureOnSlide,
             persistenceStatus: props.persistenceStatus,
             persistenceDetail: props.persistenceDetail,
             projectValidationNotice: props.projectValidationNotice,
@@ -310,6 +316,8 @@ export function useFlowboardStagePanels(
             onLayerSelect: props.onLayerSelect,
             profile,
             preflight,
+            layerBounds: props.layerBounds,
+            onArrange: props.onArrange,
             onProfileChange: props.onProfileChange,
             exportDisabled: props.exportStatus === 'exporting',
           }}
@@ -328,6 +336,18 @@ export function useFlowboardStagePanels(
         profile={profile}
         onProfileChange={props.onProfileChange}
         preflight={preflight}
+        variants={props.variants}
+        activeVariantId={props.activeVariantId}
+        onVariantPreviewChange={props.onVariantPreviewChange}
+        onVariantProfileChange={props.onVariantProfileChange}
+        onVariantToggleEnabled={props.onVariantToggleEnabled}
+        onVariantRename={props.onVariantRename}
+        onVariantAdd={props.onVariantAdd}
+        onVariantRemove={props.onVariantRemove}
+        onVariantOverrideChange={props.onVariantOverrideChange}
+        onVariantCaptureChange={props.onVariantCaptureChange}
+        exportEntries={props.exportEntries}
+        exportBlockedVariant={props.exportBlockedVariant}
         exportGate={exportGate}
         exportDetail={props.exportDetail}
         onExport={props.onExport}

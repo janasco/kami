@@ -3,8 +3,10 @@ import type { CSSProperties } from 'react'
 import { getDeviceCutoutPath, getDeviceCutoutViewBox, getDeviceGeometry } from '../lib/devicePresets'
 import { shouldShowDeviceStatusBar } from '../lib/deviceStatusBar'
 import { resolveScreenshotFit, getScreenshotFitStyle } from '../lib/screenshotFit'
+import type { KamiCapturePayload } from '../lib/screenshotDrop'
 import type { Slide } from '../types'
 import { DeviceStatusBar } from './DeviceStatusBar'
+import { useCaptureDropTarget } from './useCaptureDropTarget'
 
 /**
  * The screenshot aperture shared by the editor canvas and the export stage.
@@ -14,24 +16,65 @@ import { DeviceStatusBar } from './DeviceStatusBar'
  * an exported PNG.
  */
 
-export function DevicePlaceholder({ onImport }: { onImport?: () => void }) {
+interface DevicePlaceholderProps {
+  slideId: string
+  slideNumber: number
+  onImport?: () => void
+  /**
+   * Drop handlers for the editor canvas. The export stage passes neither, so an
+   * exported PNG is the artwork alone with nothing listening on it.
+   */
+  onDropFiles?: (slideId: string, files: File[]) => void
+  onDropCapture?: (slideId: string, capture: KamiCapturePayload) => void
+}
+
+export function DevicePlaceholder({
+  slideId,
+  slideNumber,
+  onImport,
+  onDropFiles,
+  onDropCapture,
+}: DevicePlaceholderProps) {
+  const drop = useCaptureDropTarget({ slideId, onDropFiles, onDropCapture })
+
   return (
-    <button className="device-placeholder" type="button" onClick={onImport}>
-      <span className="device-placeholder__icon" aria-hidden="true">↑</span>
-      <strong>Add your screenshot</strong>
-      <span>PNG, JPG, or WebP</span>
+    <button
+      className={`device-placeholder${drop.className ? ` ${drop.className}` : ''}`}
+      type="button"
+      onClick={onImport}
+      aria-label={drop.active
+        ? `Drop a capture onto slide ${slideNumber}`
+        : `Add a screenshot to slide ${slideNumber}`}
+      {...drop.markerProps}
+      {...drop.dropProps}
+    >
+      <span className="device-placeholder__icon" aria-hidden="true">{drop.active ? '⇪' : '↑'}</span>
+      <strong>{drop.active ? 'Drop the capture here' : 'Add your screenshot'}</strong>
+      <span>{drop.active ? `Slide ${slideNumber} is replaced` : 'PNG, JPG, or WebP'}</span>
     </button>
   )
 }
 
 interface DeviceApertureProps {
   slide: Pick<Slide, 'deviceFrameId' | 'showDeviceStatusBar' | 'screenshotFit'>
+  /** The slide this aperture belongs to, so a drop knows where to land. */
+  slideId: string
   screenshot: string | null
   slideNumber: number
   onImport?: () => void
+  onDropFiles?: (slideId: string, files: File[]) => void
+  onDropCapture?: (slideId: string, capture: KamiCapturePayload) => void
 }
 
-export function DeviceAperture({ slide, screenshot, slideNumber, onImport }: DeviceApertureProps) {
+export function DeviceAperture({
+  slide,
+  slideId,
+  screenshot,
+  slideNumber,
+  onImport,
+  onDropFiles,
+  onDropCapture,
+}: DeviceApertureProps) {
   const [screenshotFailed, setScreenshotFailed] = useState(false)
   const fit = resolveScreenshotFit(slide.screenshotFit)
   const geometry = getDeviceGeometry(slide.deviceFrameId)
@@ -65,7 +108,13 @@ export function DeviceAperture({ slide, screenshot, slideNumber, onImport }: Dev
             onError={() => setScreenshotFailed(true)}
           />
         ) : (
-          <DevicePlaceholder onImport={onImport} />
+          <DevicePlaceholder
+            slideId={slideId}
+            slideNumber={slideNumber}
+            onImport={onImport}
+            onDropFiles={onDropFiles}
+            onDropCapture={onDropCapture}
+          />
         )}
       </div>
       {/*

@@ -712,13 +712,20 @@ button:disabled {
   --theme-background: var(--theme-from);
   --theme-text: #ffffff;
   --theme-accent: var(--theme-to);
+  /*
+   * The paint behind every layer. The renderer always publishes it, so preview
+   * and export resolve the same value; the declaration here is the fallback for
+   * anything that draws a canvas without the renderer, and it is the same
+   * gradient the theme already used.
+   */
+  --background-paint: linear-gradient(145deg, var(--theme-background), var(--theme-to));
   position: relative;
   flex: 0 0 auto;
   width: 342px;
   aspect-ratio: 1242 / 2688;
   overflow: hidden;
   border-radius: 2px;
-  background: linear-gradient(145deg, var(--theme-background), var(--theme-to));
+  background: var(--background-paint);
   color: var(--theme-text);
   box-shadow: 0 28px 55px rgba(32, 30, 48, 0.2), 0 4px 12px rgba(32, 30, 48, 0.12);
   cursor: grab;
@@ -833,12 +840,48 @@ button:disabled {
   pointer-events: auto;
 }
 
+/*
+ * A theme, solid, or gradient fill paints the canvas itself, so the background
+ * image layer is off and takes no pointer. A fill is the only thing that turns
+ * this layer on or off, which is why there is no separate visibility flag to
+ * disagree with it.
+ */
+.slide-canvas[data-background-fill="theme"] .canvas-background-image,
+.slide-canvas[data-background-fill="solid"] .canvas-background-image,
+.slide-canvas[data-background-fill="gradient"] .canvas-background-image {
+  display: none;
+}
+
+/*
+ * An image fill keeps the theme paint underneath the artwork. That is what makes
+ * a missing or failed image degrade to the theme instead of exporting a hole,
+ * and it is the backdrop the blend mode composites against.
+ */
+.slide-canvas[data-background-fill="image"] .canvas-background-image,
+.slide-canvas[data-background-fill="panoramic"] .canvas-background-image {
+  background: var(--background-paint, transparent);
+}
+
 .canvas-background-image img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center;
+  /*
+   * A percentage position, not a logical one: the canvas sets dir="rtl" for
+   * ar-SA and object-position has no direction of its own, so one focal point
+   * frames every locale identically.
+   */
+  object-position: var(--background-position, center);
+  /*
+   * A transform, not a blend or a filter: html-to-image rasterizes transforms
+   * reliably through its foreignObject and does not reproduce the others. 1
+   * everywhere except a panoramic fill, so the image is not needlessly promoted
+   * to its own compositing layer.
+   */
+  transform: scale(var(--background-scale, 1));
+  transform-origin: 50% 50%;
+  mix-blend-mode: var(--background-blend, normal);
   pointer-events: none;
 }
 
@@ -1135,6 +1178,26 @@ button:disabled {
   text-align: center;
 }
 
+/*
+ * The placeholder is also a capture drop target, so a slide with no capture can
+ * be filled by dropping onto it. The highlight is an inset ring rather than an
+ * outside one, because the aperture clips anything drawn past its edge, and the
+ * tint is light enough that the placeholder's own label stays readable on top
+ * of it. The button itself is unchanged otherwise, so the click-to-import path
+ * and the artwork in an export are exactly as they were.
+ */
+.device-placeholder.is-drop-active {
+  outline: 2px solid var(--purple, #6558e8);
+  outline-offset: -8px;
+  background: rgba(101, 88, 232, 0.08);
+  cursor: copy;
+}
+
+.device-placeholder.is-drop-active .device-placeholder__icon {
+  border-color: var(--purple, #6558e8);
+  color: var(--purple, #6558e8);
+}
+
 .device-placeholder__icon {
   display: flex;
   align-items: center;
@@ -1192,6 +1255,52 @@ button:disabled {
 .canvas-footer__dot {
   color: var(--theme-accent);
   font-size: 5.2cqw;
+}
+
+/*
+ * Authoring guides. The overlay sits above the artwork and takes no pointer, so
+ * a guide can never swallow a drag or a click on the layer underneath it. The
+ * renderer also refuses to draw the overlay in the export stage.
+ */
+.canvas-guides {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.canvas-guide {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.canvas-guide--vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.canvas-guide--horizontal {
+  right: 0;
+  left: 0;
+  height: 1px;
+}
+
+.canvas-guide--center {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.canvas-guide-safe-area {
+  position: absolute;
+  border: 1px dashed rgba(255, 255, 255, 0.45);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.slide-canvas--export .canvas-guides {
+  display: none;
 }
 
 /* Layout variants */
@@ -2150,6 +2259,65 @@ button:disabled {
 }
 
 /*
+ * Background fill. One dropdown decides what paints the back of the slide, and
+ * only the fields that apply to the chosen kind are shown, so the control never
+ * offers a colour for a fill that cannot use it. The pieces it borrows —
+ * .profile-select, .shape-controls, .layer-opacity-control — are the ones the
+ * rest of the editor already uses, which is what keeps the three surfaces that
+ * mount this control looking like one product.
+ */
+.background-fill-controls {
+  display: block;
+}
+
+.background-fill-controls__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.background-gradient {
+  margin-top: 10px;
+}
+
+.background-focal {
+  margin-top: 4px;
+}
+
+.background-focal__row {
+  display: flex;
+  gap: 12px;
+}
+
+.background-focal__row .layer-opacity-control {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.background-focal__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.background-focal__readout {
+  color: #8a8994;
+  font-size: var(--type-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.background-fill-hint {
+  margin: 10px 0 0;
+  color: #8a8994;
+  font-size: var(--type-secondary);
+  line-height: var(--leading-snug);
+}
+
+/*
  * Device picker. One option per catalog preset, grouped by family, with a
  * procedurally drawn thumbnail, the display ratio, and one line of copy. The
  * grid stays two columns so the sidebar width does not change with the catalog.
@@ -2367,6 +2535,78 @@ button:disabled {
 
 .transform-grid--size {
   margin-top: 12px;
+}
+
+.layer-transform-controls__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+/*
+ * The arrange bar. One row of small grouped buttons, shared by the Refine tray
+ * and the full Inspector, so the two surfaces cannot end up with a different set
+ * of actions or a different disabled state.
+ */
+.layer-arrange {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.layer-arrange__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid #e3e1ec;
+  border-radius: 10px;
+  background: #f7f6fb;
+}
+
+.layer-arrange__action,
+.layer-arrange__scope {
+  min-width: 30px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #4b4a56;
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.layer-arrange__scope {
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+}
+
+.layer-arrange__action:hover:not(:disabled),
+.layer-arrange__scope:hover {
+  border-color: #cdc8e6;
+  background: #ffffff;
+}
+
+.layer-arrange__action:focus-visible,
+.layer-arrange__scope:focus-visible {
+  outline: 2px solid #6558e8;
+  outline-offset: 1px;
+}
+
+.layer-arrange__action:disabled {
+  color: #b4b2bf;
+  cursor: not-allowed;
+}
+
+.layer-arrange__scope.is-active {
+  border-color: #6558e8;
+  background: #ffffff;
+  color: #3c2f9e;
+  font-weight: 700;
 }
 
 .transform-flip-controls {

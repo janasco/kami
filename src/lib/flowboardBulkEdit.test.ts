@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { createSlide, getLayout, getTheme, starterSlide } from '../data'
+import { createSlide, DEFAULT_BACKGROUND_COLOR, getLayout, getTheme, starterSlide } from '../data'
 import {
   applyBulkSlideAction,
   bulkActionMergeKey,
   bulkActionValue,
   describeBulkSlideAction,
+  describeBulkSlideCaveat,
   describeBulkSlideResult,
   describeFramelessTargets,
   resolveTargetSlides,
   sharedValue,
 } from './flowboardBulkEdit'
+import { serializeProject, type EditorProject } from './project'
+import { exportProfiles } from '../data'
 import type { Slide } from '../types'
 
 const deck: Slide[] = [
@@ -19,6 +22,14 @@ const deck: Slide[] = [
 ]
 
 const allIds = deck.map((slide) => slide.id)
+
+const projectOf = (slides: Slide[]): EditorProject => ({
+  name: 'Bulk fill project',
+  slides,
+  activeLocale: 'en-US',
+  canvasMode: 'isolated',
+  selectedExportProfileId: exportProfiles[0].id,
+})
 
 describe('bulk action payloads', () => {
   it('writes the device frame, fit, and status bar the way the single-slide controls do', () => {
@@ -69,6 +80,85 @@ describe('bulk action payloads', () => {
     }
     expect(applyBulkSlideAction(withoutLayer, { kind: 'layer-opacity', layerId: 'footer', opacity: 0.5 })).toBeNull()
     expect(applyBulkSlideAction(withoutLayer, { kind: 'layer-visibility', layerId: 'footer', visible: false })).toBeNull()
+  })
+})
+
+describe('bulk background fill actions', () => {
+  const withBackground = (overrides: Partial<Slide> = {}): Slide => ({
+    ...deck[0],
+    backgroundImage: { name: 'backdrop.png', dataUrl: 'data:image/png;base64,AAA', mimeType: 'image/png' },
+    ...overrides,
+  })
+
+  it('writes the fill the single-slide control writes, through the same normalizer', () => {
+    const applied = applyBulkSlideAction(withBackground(), { kind: 'background-fill', backgroundFill: 'panoramic' })
+    expect(applied?.backgroundFill).toEqual({ kind: 'panoramic' })
+    // A colour the slide already carried does not survive a switch to a fill
+    // that has nowhere to put it.
+    const solid = applyBulkSlideAction(withBackground({ backgroundFill: { kind: 'solid', color: '#0b1020' } }), { kind: 'background-fill', backgroundFill: 'image' })
+    expect(solid?.backgroundFill).toEqual({ kind: 'image' })
+    expect(applyBulkSlideAction(withBackground(), { kind: 'background-fill', backgroundFill: 'solid' })?.backgroundFill)
+      .toEqual({ kind: 'solid', color: DEFAULT_BACKGROUND_COLOR })
+  })
+
+  it('clears the record entirely for the theme fill, so a save writes no field', () => {
+    const applied = applyBulkSlideAction(withBackground({ backgroundFill: { kind: 'gradient' } }), { kind: 'background-fill', backgroundFill: 'theme' })
+    expect(applied?.backgroundFill).toBeUndefined()
+    expect(serializeProject(projectOf([applied!])).slides[0]).not.toHaveProperty('backgroundFill')
+  })
+
+  it('returns null when the whole selection already holds the fill', () => {
+    expect(applyBulkSlideAction(withBackground({ backgroundFill: { kind: 'panoramic', blend: 'screen' } }), { kind: 'background-fill', backgroundFill: 'panoramic' })).toBeNull()
+    expect(applyBulkSlideAction(deck[0], { kind: 'background-fill', backgroundFill: 'theme' })).toBeNull()
+  })
+
+  it('clamps a bulk focal point and drops it again at the centre', () => {
+    const applied = applyBulkSlideAction(withBackground(), { kind: 'focal-point', focalPoint: { x: 5, y: -2 } })
+    expect(applied?.backgroundFocalPoint).toEqual({ x: 1, y: 0 })
+
+    const recentred = applyBulkSlideAction(
+      { ...withBackground(), backgroundFocalPoint: { x: 0.2, y: 0.3 } },
+      { kind: 'focal-point', focalPoint: { x: 0.5, y: 0.5 } },
+    )
+    expect(recentred?.backgroundFocalPoint).toBeUndefined()
+    expect(recentred).not.toBeNull()
+  })
+
+  it('returns null when the focal point already sits where the action puts it', () => {
+    expect(applyBulkSlideAction(withBackground(), { kind: 'focal-point', focalPoint: { x: 0.5, y: 0.5 } })).toBeNull()
+    expect(applyBulkSlideAction(
+      { ...withBackground(), backgroundFocalPoint: { x: 0.3, y: 0.4 } },
+      { kind: 'focal-point', focalPoint: { x: 0.3, y: 0.4 } },
+    )).toBeNull()
+  })
+
+  it('gives the fill choice its own undo step and coalesces a focal drag', () => {
+    const ids = allIds
+    expect(bulkActionMergeKey({ kind: 'background-fill', backgroundFill: 'panoramic' }, ids))
+      .toBe('bulk:3:background-fill:panoramic')
+    expect(bulkActionMergeKey({ kind: 'background-fill', backgroundFill: 'image' }, ids))
+      .not.toBe(bulkActionMergeKey({ kind: 'background-fill', backgroundFill: 'panoramic' }, ids))
+
+    const near = bulkActionMergeKey({ kind: 'focal-point', focalPoint: { x: 0.1, y: 0.1 } }, ids)
+    const far = bulkActionMergeKey({ kind: 'focal-point', focalPoint: { x: 0.9, y: 0.9 } }, ids)
+    expect(near).toBe(far)
+    expect(near).toBe('bulk:3:focal-point')
+  })
+
+  it('describes both actions in the bulk notice', () => {
+    expect(describeBulkSlideAction({ kind: 'background-fill', backgroundFill: 'panoramic' })).toBe('Background fill set to Panoramic')
+    expect(describeBulkSlideAction({ kind: 'focal-point', focalPoint: { x: 0.5, y: 0.42 } }))
+      .toBe('Background focal point set to 50% across, 42% down')
+    expect(bulkActionValue({ kind: 'background-fill', backgroundFill: 'image' })).toBe('image')
+  })
+
+  it('warns when an image fill is applied to slides that have no image', () => {
+    const targets = [withBackground(), deck[1], deck[2]]
+    expect(describeBulkSlideCaveat({ kind: 'background-fill', backgroundFill: 'image' }, targets))
+      .toBe('2 selected slides have no background image, so the theme paint shows until one is added.')
+    expect(describeBulkSlideCaveat({ kind: 'background-fill', backgroundFill: 'image' }, [withBackground()])).toBeNull()
+    expect(describeBulkSlideCaveat({ kind: 'background-fill', backgroundFill: 'gradient' }, targets)).toBeNull()
+    expect(describeBulkSlideCaveat({ kind: 'focal-point', focalPoint: { x: 0.5, y: 0.5 } }, targets)).toBeNull()
   })
 })
 

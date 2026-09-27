@@ -1,6 +1,8 @@
 import { exportProfiles, pendingExportProfiles, slideLayerLabels } from '../data'
+import { enabledVariantsForProfile, expandVariantRenders } from './deviceVariants'
+import { isDeviceFrameId, isKnownDeviceFrameId } from './devicePresets'
 import { getSlideText } from './localization'
-import type { ExportProfile, LayerId, LocaleId, Slide } from '../types'
+import type { ExportProfile, LayerId, LocaleId, OutputVariant, Slide } from '../types'
 
 export type ExportPreflightStatus = 'ready' | 'warnings' | 'blocked'
 export type ExportPreflightSeverity = 'warning' | 'blocking'
@@ -17,14 +19,49 @@ export type ExportPreflightIssueCode =
   | 'orientation-warning'
   | 'bounds-outside-canvas'
   | 'invalid-image-data'
+  /** An enabled variant renders a slide with no capture, and the profile needs one. */
+  | 'missing-variant-capture'
+  /** A variant override names a device frame this catalog does not have. */
+  | 'unsupported-device-variant'
 
 export interface ExportPreflightIssue {
   code: ExportPreflightIssueCode
   severity: ExportPreflightSeverity
   message: string
+  /**
+   * 1-based positions in the **authoring deck**, never in a variant.
+   *
+   * A variant names a subset of the slides, so a number that counted within the
+   * variant would not index `slides` and every "open this slide" affordance would
+   * point at the wrong slide. The variant is carried as a label beside these
+   * numbers rather than as a second coordinate system; see
+   * {@link formatPreflightIssueLocation}.
+   */
   slideNumbers: number[]
   layerId?: LayerId
   profileId?: string
+  /** Set when the issue belongs to one output variant rather than the deck. */
+  variantId?: string
+  variantName?: string
+}
+
+/**
+ * Where an issue is, in one line: the deck position plus the variant name.
+ *
+ * The alternative was a second coordinate system, a variant-relative slide
+ * number. That would have broken `slides[slideNumber - 1]`, which the Ship stage
+ * uses to find the slide its "Open slide" button navigates to, and the button
+ * disappears without warning on a miss. So the number keeps indexing the deck
+ * and the variant is appended as a label.
+ */
+export const formatPreflightIssueLocation = (issue: Pick<ExportPreflightIssue, 'slideNumbers' | 'variantName'>): string => {
+  const positions = issue.slideNumbers
+  const deck = positions.length === 0
+    ? 'Project'
+    : positions.length === 1
+      ? `Slide ${positions[0]}`
+      : `Slides ${positions.join(', ')}`
+  return issue.variantName ? `${deck} · ${issue.variantName}` : deck
 }
 
 export interface ExportPreflightResult {
@@ -51,6 +88,15 @@ export interface ExportPreflightInput {
   slides: Slide[]
   activeLocale: LocaleId
   layerBounds?: PreflightLayerBoundsBySlide
+  /**
+   * The deck's output variants, in document order.
+   *
+   * Optional and additive: a caller that knows nothing about variants gets
+   * exactly the deck-wide result it got before the field existed. Only the
+   * enabled variants targeting `profile` are inspected, so a deck of many
+   * variants costs one pass per relevant one rather than a render of all of them.
+   */
+  variants?: readonly OutputVariant[]
 }
 
 const OUTSIDE_CANVAS_TOLERANCE_PX = 0.5
@@ -134,15 +180,26 @@ export const isValidImageDataUrl = (value: string): boolean => {
   }
 }
 
+/**
+ * Measures the drawn layers of each slide on the export stage.
+ *
+ * The export stage now lays out one node per *planned entry*, so the node at
+ * index N is not necessarily `slides[N]`. `slideIds` states which slide each node
+ * belongs to, and the caller passes the first enabled variant's renders: that is
+ * one coherent device set, and for a deck with a single default variant it is
+ * exactly the base deck, so the measured boxes are the ones they always were.
+ */
 export const collectExportPreflightBounds = (
   stage: HTMLElement,
   slides: Slide[],
+  slideIds: readonly string[] = slides.map((slide) => slide.id),
 ): PreflightLayerBoundsBySlide => {
   const slideNodes = Array.from(stage.querySelectorAll<HTMLElement>('[data-export-slide]'))
+  const byId = new Map(slides.map((slide) => [slide.id, slide]))
   const result: PreflightLayerBoundsBySlide = {}
 
-  slideNodes.forEach((slideNode, index) => {
-    const slide = slides[index]
+  slideNodes.slice(0, slideIds.length).forEach((slideNode, index) => {
+    const slide = byId.get(slideIds[index])
     const canvas = slideNode.querySelector<HTMLElement>('.slide-canvas')
     if (!slide || !canvas) return
 
@@ -194,6 +251,7 @@ export function runExportPreflight({
   slides,
   activeLocale,
   layerBounds = {},
+  variants = [],
 }: ExportPreflightInput): ExportPreflightResult {
   const issues: ExportPreflightIssue[] = []
   const supportedProfile = exportProfiles.find((candidate) => candidate.id === profile.id)
@@ -395,6 +453,48 @@ export function runExportPreflight({
       slideNumbers,
     })
   })
+
+  /*
+   * The variant dimension.
+   *
+   * Two things the deck-wide pass above cannot see, both of which would otherwise
+   * reach the store as a finished-looking file:
+   *
+   * - a variant that renders a slide with no capture, which is a per-variant
+   *   fact and not a deck one, and
+   * - a variant naming a device frame this catalog does not have, which would
+   *   otherwise be silently resolved to some other device.
+   *
+   * Both are blocking. The name comes from the variant, and the slide numbers
+   * stay 1-based positions in the authoring deck.
+   */
+  for (const variant of enabledVariantsForProfile(variants, profile.id)) {
+    const scope = { variantId: variant.id, variantName: variant.name }
+    for (const render of expandVariantRenders(slides, variant)) {
+      if (render.missingCapture && profile.preflight?.requirements.screenshot !== false) {
+        addIssue(issues, {
+          code: 'missing-variant-capture',
+          severity: 'blocking',
+          message: `The “${variant.name}” variant has no capture on slide ${render.slideNumber}.`,
+          slideNumbers: [render.slideNumber],
+          layerId: 'screenshot',
+          ...scope,
+        })
+      }
+      const override = render.override
+      if (override?.deviceFrameId === undefined) continue
+      // An older spelling is migratable, so it is not a blocker; a name nothing
+      // can map is, because the renderer would have to guess a device.
+      if (isDeviceFrameId(override.deviceFrameId) || isKnownDeviceFrameId(override.deviceFrameId)) continue
+      addIssue(issues, {
+        code: 'unsupported-device-variant',
+        severity: 'blocking',
+        message: `The “${variant.name}” variant asks for a device this editor does not have: ${String(override.deviceFrameId)}.`,
+        slideNumbers: [render.slideNumber],
+        ...scope,
+      })
+    }
+  }
 
   const normalizedIssues = issues.map((entry) => ({ ...entry, slideNumbers: uniqueSlideNumbers(entry.slideNumbers) }))
   const blockingIssues = normalizedIssues.filter((entry) => entry.severity === 'blocking')

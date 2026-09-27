@@ -3,8 +3,10 @@ import type { DragEvent } from 'react'
 import { exportProfiles, localeOptions } from '../../data'
 import { projectTemplates, type ProjectTemplate } from '../../lib/projectTemplates'
 import { SCREENSHOT_IMPORT_ACCEPT } from '../../lib/screenshotImport'
+import { isProjectDropFile, type KamiCapturePayload } from '../../lib/screenshotDrop'
 import type { FlowboardChecklistItem, FlowboardStageId } from '../../lib/flowboardStages'
 import type { ExportProfile, LocaleId, Slide } from '../../types'
+import { SlideDropTarget } from './SlideDropTarget'
 import { SlideThumbnail } from './SlideThumbnail'
 
 interface IntakeStageProps {
@@ -27,9 +29,14 @@ interface IntakeStageProps {
   onLoadDemo: () => void
   onStartBlank: () => void
   onOpenProject: () => void
+  /**
+   * Image files dropped on one deck tile. Resolves to the notice for the drop so
+   * it can be stated next to the strip.
+   */
+  onDropFiles: (slideId: string, files: File[]) => Promise<string>
+  /** A capture dragged from one deck tile onto another. */
+  onDropCapture: (slideId: string, capture: KamiCapturePayload) => string
 }
-
-const isProjectFile = (file: File) => /\.json$/i.test(file.name) || file.type === 'application/json'
 
 /**
  * Stage 1. The entry point of the shell: bring captures in, name the project,
@@ -55,11 +62,24 @@ export function IntakeStage({
   onLoadDemo,
   onStartBlank,
   onOpenProject,
+  onDropFiles,
+  onDropCapture,
 }: IntakeStageProps) {
   const [dragging, setDragging] = useState(false)
   const [dropNote, setDropNote] = useState<string | null>(null)
+  const [slideNote, setSlideNote] = useState<string | null>(null)
   const dragDepthRef = useRef(0)
   const captureRequired = profile.preflight?.requirements.screenshot !== false
+
+  /**
+   * The big dropzone takes files, and only files.
+   *
+   * It assigns a whole deck in order, so a capture dragged off a card must not
+   * be claimed here: dropping one on this panel would replace the deck instead of
+   * the one slide the author aimed at. Reading the type keeps the two apart.
+   */
+  const carriesFiles = (transfer: DataTransfer | null) =>
+    Array.from(transfer?.types ?? []).includes('Files')
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -68,8 +88,10 @@ export function IntakeStage({
     const files = Array.from(event.dataTransfer?.files ?? [])
     if (files.length === 0) return
 
-    const projectFiles = files.filter(isProjectFile)
-    const imageFiles = files.filter((file) => !isProjectFile(file))
+    // The same classification the slide drops use, so a project file and a
+    // capture are never mistaken for one another here either.
+    const projectFiles = files.filter(isProjectDropFile)
+    const imageFiles = files.filter((file) => !isProjectDropFile(file))
     if (projectFiles.length > 0) {
       onOpenProjectFile(projectFiles[0])
       setDropNote(`Opened ${projectFiles[0].name}. The project replaces the current deck and can be undone.`)
@@ -84,15 +106,34 @@ export function IntakeStage({
   }
 
   const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!carriesFiles(event.dataTransfer)) return
     event.preventDefault()
     dragDepthRef.current += 1
     setDragging(true)
   }
 
   const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (!carriesFiles(event.dataTransfer)) return
     event.preventDefault()
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
     if (dragDepthRef.current === 0) setDragging(false)
+  }
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!carriesFiles(event.dataTransfer)) return
+    event.preventDefault()
+  }
+
+  /**
+   * A drop on one deck tile is stated next to the strip, not up in the big
+   * dropzone, so the outcome of the drop is next to the slide it changed.
+   */
+  const dropFilesOnSlide = (slideId: string, files: File[]) => {
+    void onDropFiles(slideId, files).then(setSlideNote)
+  }
+
+  const dropCaptureOnSlide = (slideId: string, dropped: KamiCapturePayload) => {
+    setSlideNote(onDropCapture(slideId, dropped))
   }
 
   return (
@@ -100,7 +141,7 @@ export function IntakeStage({
       <section className="flowboard-panel flowboard-dropzone" aria-labelledby="intake-capture-title">
         <div
           className={`flowboard-dropzone__target${dragging ? ' is-dragging' : ''}`}
-          onDragOver={(event) => event.preventDefault()}
+          onDragOver={handleDragOver}
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -251,17 +292,31 @@ export function IntakeStage({
         <div className="flowboard-panel__heading">
           <span className="eyebrow">Current deck</span>
           <h3 id="intake-deck-title">{slides.length} slide{slides.length === 1 ? '' : 's'} in this project</h3>
+          <p className="flowboard-hint">
+            Drop images straight onto a slide to fill it, or drag one slide&apos;s capture onto another to copy it.
+          </p>
         </div>
         <ul className="flowboard-mini-strip" role="list">
           {slides.map((slide, index) => (
             <li key={slide.id}>
-              <SlideThumbnail slide={slide} index={index} />
-              <span className="flowboard-mini-strip__label">
-                {slide.title.split('\n')[0].trim() || `Slide ${index + 1}`}
-              </span>
+              <SlideDropTarget
+                slide={slide}
+                className="flowboard-mini-strip__item"
+                hint={slide.screenshot ? 'Drop to replace' : 'Drop to add'}
+                onDropFiles={dropFilesOnSlide}
+                onDropCapture={dropCaptureOnSlide}
+              >
+                <SlideThumbnail slide={slide} index={index} />
+                <span className="flowboard-mini-strip__label">
+                  {slide.title.split('\n')[0].trim() || `Slide ${index + 1}`}
+                </span>
+              </SlideDropTarget>
             </li>
           ))}
         </ul>
+        <p className="flowboard-hint flowboard-drop-note" role="status" aria-live="polite">
+          {slideNote ?? 'Dropping onto a slide replaces only that slide. Drop onto the panel above to place a whole sequence from slide 1.'}
+        </p>
       </section>
     </div>
   )

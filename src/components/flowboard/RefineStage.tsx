@@ -5,15 +5,17 @@ import {
   slideLayerIds,
   slideLayerLabels,
   themes,
-  TRANSFORM_SIZE_MAX,
-  TRANSFORM_SIZE_MIN,
 } from '../../data'
 import { getSlideText } from '../../lib/localization'
 import { isRefineIssue } from '../../lib/flowboardStages'
 import type { ExportPreflightResult } from '../../lib/exportPreflight'
+import type { ArrangeScope } from '../../lib/layerArrange'
 import type { LayoutId, ThemeId } from '../../types'
 import type { CopyEditorRequest } from './useFlowboardStagePanels'
 import { Inspector, type InspectorProps } from '../Inspector'
+import { BackgroundFillControls } from '../BackgroundFillControls'
+import { LayerArrangeControls } from '../LayerArrangeControls'
+import { LayerTransformControls, LayerTransformResetButton } from '../LayerTransformControls'
 import { SlideCanvas, type SlideCanvasProps } from '../SlideCanvas'
 
 interface RefineStageProps {
@@ -50,9 +52,15 @@ const issueSlideLabel = (slideNumbers: number[]) => {
  */
 export function RefineStage({ canvas, inspector, preflight, onGoToSlide, copyEditorRequest }: RefineStageProps) {
   const [drawerOpen, setDrawerOpen] = useState(false)
+  /**
+   * Canvas guides and the arrange scope are UI-only choices. Neither is
+   * serialized, so turning a guide on cannot change the project, and the scope
+   * only decides which transform an action writes.
+   */
+  const [guidesVisible, setGuidesVisible] = useState(true)
+  const [arrangeScope, setArrangeScope] = useState<ArrangeScope>('layer')
   const slide = inspector.slide
   const text = getSlideText(slide, inspector.activeLocale)
-  const selectedTransform = slide.layerTransforms[inspector.selectedLayerId]
   const selectedSettings = slide.layerSettings[inspector.selectedLayerId]
   const layerLabel = slideLayerLabels[inspector.selectedLayerId]
   const layerIssues = preflight.issues.filter(isRefineIssue)
@@ -76,19 +84,6 @@ export function RefineStage({ canvas, inspector, preflight, onGoToSlide, copyEdi
     field.select()
   }, [copyEditorRequest, inspector.activeLocale, slide.id])
 
-  const updateTransform = (field: 'x' | 'y' | 'scale' | 'rotation', value: number) => {
-    if (!Number.isFinite(value) || (field === 'scale' && value <= 0)) return
-    const safeValue = field === 'scale'
-      ? Math.min(TRANSFORM_SIZE_MAX, Math.max(TRANSFORM_SIZE_MIN, value))
-      : value
-    inspector.onUpdate({
-      layerTransforms: {
-        ...slide.layerTransforms,
-        [inspector.selectedLayerId]: { ...selectedTransform, [field]: safeValue },
-      },
-    }, `layer-transform:${slide.id}:${inspector.selectedLayerId}:${field}`)
-  }
-
   return (
     <div className={`flowboard-stage-body flowboard-refine${drawerOpen ? ' has-drawer' : ''}`}>
       <section className="flowboard-panel flowboard-panel--wide flowboard-refine__canvas" aria-labelledby="refine-canvas-title">
@@ -99,6 +94,17 @@ export function RefineStage({ canvas, inspector, preflight, onGoToSlide, copyEdi
           </div>
           <div className="flowboard-panel__heading-actions">
             <span className="flowboard-badge">Editing: {layerLabel}</span>
+            <label className="layer-visibility-toggle flowboard-guides-toggle" htmlFor="flowboard-canvas-guides">
+              <span>Guides</span>
+              <input
+                id="flowboard-canvas-guides"
+                type="checkbox"
+                checked={guidesVisible}
+                onChange={(event) => setGuidesVisible(event.target.checked)}
+                aria-label="Show canvas guides"
+              />
+              <span className="switch" aria-hidden="true" />
+            </label>
             <button
               className="button button--outline button--small"
               type="button"
@@ -111,10 +117,10 @@ export function RefineStage({ canvas, inspector, preflight, onGoToSlide, copyEdi
           </div>
         </div>
         <p className="flowboard-hint">
-          Click any layer on the canvas to select it, then drag to reposition. Changes autosave and can be undone.
+          Click any layer on the canvas to select it, then drag to reposition. Arrow keys nudge the selected layer, Shift for a bigger step and Alt for a finer one.
         </p>
         <div className="flowboard-refine__stage">
-          <SlideCanvas {...canvas} />
+          <SlideCanvas {...canvas} showGuides={guidesVisible} />
         </div>
       </section>
 
@@ -184,69 +190,39 @@ export function RefineStage({ canvas, inspector, preflight, onGoToSlide, copyEdi
           </div>
         </div>
 
-        <div className="transform-grid">
-          <div className="transform-field">
-            <label className="field-label" htmlFor="flowboard-transform-x">X %</label>
-            <div className="transform-input-wrap">
-              <input
-                id="flowboard-transform-x"
-                className="transform-input"
-                type="number"
-                step="1"
-                value={selectedTransform.x}
-                aria-label={`${layerLabel} position X percentage`}
-                onChange={(event) => updateTransform('x', Number(event.target.value))}
-              />
-              <span aria-hidden="true">%</span>
-            </div>
-          </div>
-          <div className="transform-field">
-            <label className="field-label" htmlFor="flowboard-transform-y">Y %</label>
-            <div className="transform-input-wrap">
-              <input
-                id="flowboard-transform-y"
-                className="transform-input"
-                type="number"
-                step="1"
-                value={selectedTransform.y}
-                aria-label={`${layerLabel} position Y percentage`}
-                onChange={(event) => updateTransform('y', Number(event.target.value))}
-              />
-              <span aria-hidden="true">%</span>
-            </div>
-          </div>
-          <div className="transform-field">
-            <label className="field-label" htmlFor="flowboard-transform-scale">Scale</label>
-            <div className="transform-input-wrap">
-              <input
-                id="flowboard-transform-scale"
-                className="transform-input"
-                type="number"
-                min="0.05"
-                step="0.05"
-                value={selectedTransform.scale}
-                aria-label={`${layerLabel} scale`}
-                onChange={(event) => updateTransform('scale', Number(event.target.value))}
-              />
-              <span aria-hidden="true">×</span>
-            </div>
-          </div>
-          <div className="transform-field">
-            <label className="field-label" htmlFor="flowboard-transform-rotation">Rotation</label>
-            <div className="transform-input-wrap">
-              <input
-                id="flowboard-transform-rotation"
-                className="transform-input"
-                type="number"
-                step="1"
-                value={selectedTransform.rotation}
-                aria-label={`${layerLabel} rotation in degrees`}
-                onChange={(event) => updateTransform('rotation', Number(event.target.value))}
-              />
-              <span aria-hidden="true">°</span>
-            </div>
-          </div>
-        </div>
+        <LayerArrangeControls
+          slide={slide}
+          selectedLayerId={inspector.selectedLayerId}
+          layerBounds={inspector.layerBounds}
+          profile={inspector.profile}
+          onArrange={inspector.onArrange}
+          idPrefix="flowboard-arrange"
+          scope={arrangeScope}
+          onScopeChange={setArrangeScope}
+        />
+
+        <LayerTransformControls
+          slide={slide}
+          layerId={inspector.selectedLayerId}
+          idPrefix="flowboard-transform"
+          onUpdate={inspector.onUpdate}
+          actions={(
+            <LayerTransformResetButton
+              slide={slide}
+              layerId={inspector.selectedLayerId}
+              onUpdate={inspector.onUpdate}
+            />
+          )}
+        />
+
+        <section className="flowboard-tray__group" aria-labelledby="refine-background-title">
+          <span className="eyebrow" id="refine-background-title">Background</span>
+          <BackgroundFillControls
+            slide={slide}
+            idPrefix="flowboard-background"
+            onUpdate={inspector.onUpdate}
+          />
+        </section>
 
         <label className="field-label" htmlFor="flowboard-headline">Headline</label>
         <textarea

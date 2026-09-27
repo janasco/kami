@@ -22,7 +22,14 @@ export const formatFileSize = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-const isScreenshotFile = (file: File) => {
+/**
+ * Whether a file is a capture Kami can embed.
+ *
+ * Exported so every path that has to recognise a capture — the import dialog,
+ * the deck-wide file import, and the drop planner — asks the same question of
+ * the same file, and cannot drift into accepting a different set of types.
+ */
+export const isAcceptedScreenshotFile = (file: { name: string; type?: string }) => {
   if (file.type) return acceptedTypes.has(file.type.toLowerCase())
   const extension = file.name.split('.').pop()?.toLowerCase()
   return extension !== undefined && acceptedExtensions.has(extension)
@@ -32,7 +39,7 @@ export const validateScreenshotFiles = (files: File[]): ScreenshotFileCandidate[
   let validIndex = 0
   return files.map((file) => {
     let error: string | null = null
-    if (!isScreenshotFile(file)) error = 'Not a PNG, JPG, or WebP image.'
+    if (!isAcceptedScreenshotFile(file)) error = 'Not a PNG, JPG, or WebP image.'
     else if (file.size > SCREENSHOT_IMPORT_MAX_BYTES) {
       error = `Too large: ${formatFileSize(file.size)}. The limit is 10 MB per image.`
     }

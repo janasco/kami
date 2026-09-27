@@ -1,15 +1,16 @@
-import { createDefaultLayerTransforms, exportProfiles, layouts, localeOptions, sanitizeLayerOpacity, slideLayerIds, slideLayerLabels, screenshotFitOptions, themes, TRANSFORM_SIZE_MAX, TRANSFORM_SIZE_MIN } from '../data'
+import { useState } from 'react'
+import { exportProfiles, layouts, localeOptions, sanitizeLayerOpacity, slideLayerIds, slideLayerLabels, screenshotFitOptions, themes } from '../data'
 import { isFramelessDeviceId } from '../lib/devicePresets'
 import { DEFAULT_DEVICE_STATUS_BAR_TIME } from '../lib/deviceStatusBar'
 import { describeScreenshotFit } from '../lib/screenshotFit'
 import { getSlideText, translationFieldLabel } from '../lib/localization'
-import type { ExportPreflightResult } from '../lib/exportPreflight'
+import type { ExportPreflightResult, PreflightLayerBoundsBySlide } from '../lib/exportPreflight'
+import type { ArrangeScope, LayerArrangeAction } from '../lib/layerArrange'
 import type { AccentShapeType, ExportProfile, LayerId, LayerSettings, LayoutId, LocaleId, Slide, ThemeId } from '../types'
 import { DeviceFramePicker } from './DeviceFramePicker'
-
-type NumericTransformField = 'x' | 'y' | 'scale' | 'rotation' | 'widthScale' | 'heightScale'
-
-const transformNumericFields: NumericTransformField[] = ['x', 'y', 'scale', 'rotation', 'widthScale', 'heightScale']
+import { BackgroundFillControls } from './BackgroundFillControls'
+import { LayerArrangeControls } from './LayerArrangeControls'
+import { LayerTransformControls, LayerTransformResetButton } from './LayerTransformControls'
 
 const preflightStatusLabel = {
   ready: 'Ready',
@@ -38,6 +39,10 @@ export interface InspectorProps {
   onLayerSelect: (layerId: LayerId) => void
   profile: ExportProfile
   preflight: ExportPreflightResult
+  /** Measured layer boxes, keyed by slide id, used by the arrange bar. */
+  layerBounds: PreflightLayerBoundsBySlide
+  /** Applies one align, distribute, or stacking action in a single undo step. */
+  onArrange: (action: LayerArrangeAction) => void
   onProfileChange: (profileId: ExportProfile['id']) => void
   exportDisabled: boolean
 }
@@ -57,6 +62,8 @@ export function Inspector({
   onLayerSelect,
   profile,
   preflight,
+  layerBounds,
+  onArrange,
   onProfileChange,
   exportDisabled,
 }: InspectorProps) {
@@ -66,27 +73,13 @@ export function Inspector({
     ...(text.isTitleTranslated ? [] : ['title' as const]),
     ...(text.isSubtitleTranslated ? [] : ['subtitle' as const]),
   ]
-  const selectedTransform = slide.layerTransforms[selectedLayerId]
   const selectedSettings = slide.layerSettings[selectedLayerId]
   const isFramelessDevice = isFramelessDeviceId(slide.deviceFrameId)
-  const defaultTransforms = createDefaultLayerTransforms()
-  const isDefaultTransform = transformNumericFields.every(
-    (field) => selectedTransform[field] === defaultTransforms[selectedLayerId][field],
-  ) && selectedTransform.flipX === defaultTransforms[selectedLayerId].flipX
-    && selectedTransform.flipY === defaultTransforms[selectedLayerId].flipY
-
-  const updateTransform = (field: NumericTransformField, value: number) => {
-    if (!Number.isFinite(value) || (field === 'scale' && value <= 0)) return
-    const safeValue = field === 'widthScale' || field === 'heightScale'
-      ? Math.min(TRANSFORM_SIZE_MAX, Math.max(TRANSFORM_SIZE_MIN, value))
-      : value
-    onUpdate({
-      layerTransforms: {
-        ...slide.layerTransforms,
-        [selectedLayerId]: { ...selectedTransform, [field]: safeValue },
-      },
-    }, `layer-transform:${slide.id}:${selectedLayerId}:${field}`)
-  }
+  /**
+   * Which arrange scope the align buttons act on. UI-only: it decides which
+   * transform an action writes, never what is stored.
+   */
+  const [arrangeScope, setArrangeScope] = useState<ArrangeScope>('layer')
 
   const updateLayerSettings = (
     field: keyof LayerSettings,
@@ -227,6 +220,18 @@ export function Inspector({
 
         <section className="inspector-section">
           <div className="section-label">
+            <span>Background</span>
+            <span className="section-label__hint">Fill &amp; framing</span>
+          </div>
+          <BackgroundFillControls
+            slide={slide}
+            idPrefix="background-fill"
+            onUpdate={onUpdate}
+          />
+        </section>
+
+        <section className="inspector-section">
+          <div className="section-label">
             <span>Device frame</span>
             <span className="section-label__hint">Screenshot</span>
           </div>
@@ -291,20 +296,7 @@ export function Inspector({
         <section className="inspector-section">
           <div className="section-label">
             <span>Layer transform</span>
-            <button
-              className="text-button text-button--compact"
-              type="button"
-              disabled={isDefaultTransform}
-              onClick={() => onUpdate({
-                layerTransforms: {
-                  ...slide.layerTransforms,
-                  [selectedLayerId]: defaultTransforms[selectedLayerId],
-                },
-              }, `layer-transform:${slide.id}:${selectedLayerId}:reset`)}
-              aria-label={`Reset ${slideLayerLabels[selectedLayerId]} transform`}
-            >
-              Reset
-            </button>
+            <LayerTransformResetButton slide={slide} layerId={selectedLayerId} onUpdate={onUpdate} />
           </div>
           <div className="layer-picker" role="group" aria-label="Canvas layer">
             {slideLayerIds.map((layerId) => (
@@ -391,135 +383,22 @@ export function Inspector({
               </div>
             </div>
           )}
-          <div className="transform-grid">
-            <div className="transform-field">
-              <label className="field-label" htmlFor="layer-transform-x">Position X</label>
-              <div className="transform-input-wrap">
-                <input
-                  id="layer-transform-x"
-                  className="transform-input"
-                  type="number"
-                  step="1"
-                  value={selectedTransform.x}
-                  onChange={(event) => updateTransform('x', Number(event.target.value))}
-                  aria-label={`${slideLayerLabels[selectedLayerId]} position X percentage`}
-                />
-                <span aria-hidden="true">%</span>
-              </div>
-            </div>
-            <div className="transform-field">
-              <label className="field-label" htmlFor="layer-transform-y">Position Y</label>
-              <div className="transform-input-wrap">
-                <input
-                  id="layer-transform-y"
-                  className="transform-input"
-                  type="number"
-                  step="1"
-                  value={selectedTransform.y}
-                  onChange={(event) => updateTransform('y', Number(event.target.value))}
-                  aria-label={`${slideLayerLabels[selectedLayerId]} position Y percentage`}
-                />
-                <span aria-hidden="true">%</span>
-              </div>
-            </div>
-            <div className="transform-field">
-              <label className="field-label" htmlFor="layer-transform-scale">Scale</label>
-              <div className="transform-input-wrap">
-                <input
-                  id="layer-transform-scale"
-                  className="transform-input"
-                  type="number"
-                  min="0.05"
-                  step="0.05"
-                  value={selectedTransform.scale}
-                  onChange={(event) => updateTransform('scale', Number(event.target.value))}
-                  aria-label={`${slideLayerLabels[selectedLayerId]} scale`}
-                />
-                <span aria-hidden="true">×</span>
-              </div>
-            </div>
-            <div className="transform-field">
-              <label className="field-label" htmlFor="layer-transform-rotation">Rotation</label>
-              <div className="transform-input-wrap">
-                <input
-                  id="layer-transform-rotation"
-                  className="transform-input"
-                  type="number"
-                  step="1"
-                  value={selectedTransform.rotation}
-                  onChange={(event) => updateTransform('rotation', Number(event.target.value))}
-                  aria-label={`${slideLayerLabels[selectedLayerId]} rotation in degrees`}
-                />
-                <span aria-hidden="true">°</span>
-              </div>
-            </div>
-          </div>
-          <div className="transform-grid transform-grid--size" role="group" aria-label="Layer size">
-            <div className="transform-field">
-              <label className="field-label" htmlFor="layer-transform-width-scale">Width scale</label>
-              <div className="transform-input-wrap">
-                <input
-                  id="layer-transform-width-scale"
-                  className="transform-input"
-                  type="number"
-                  min={TRANSFORM_SIZE_MIN}
-                  max={TRANSFORM_SIZE_MAX}
-                  step="0.05"
-                  value={selectedTransform.widthScale}
-                  onChange={(event) => updateTransform('widthScale', Number(event.target.value))}
-                  aria-label={`${slideLayerLabels[selectedLayerId]} width scale`}
-                />
-                <span aria-hidden="true">×</span>
-              </div>
-            </div>
-            <div className="transform-field">
-              <label className="field-label" htmlFor="layer-transform-height-scale">Height scale</label>
-              <div className="transform-input-wrap">
-                <input
-                  id="layer-transform-height-scale"
-                  className="transform-input"
-                  type="number"
-                  min={TRANSFORM_SIZE_MIN}
-                  max={TRANSFORM_SIZE_MAX}
-                  step="0.05"
-                  value={selectedTransform.heightScale}
-                  onChange={(event) => updateTransform('heightScale', Number(event.target.value))}
-                  aria-label={`${slideLayerLabels[selectedLayerId]} height scale`}
-                />
-                <span aria-hidden="true">×</span>
-              </div>
-            </div>
-          </div>
-          <div className="transform-flip-controls" role="group" aria-label={`${slideLayerLabels[selectedLayerId]} flips`}>
-            <label className="transform-flip-control" htmlFor="layer-transform-flip-x">
-              <input
-                id="layer-transform-flip-x"
-                type="checkbox"
-                checked={selectedTransform.flipX}
-                onChange={(event) => onUpdate({
-                  layerTransforms: {
-                    ...slide.layerTransforms,
-                    [selectedLayerId]: { ...selectedTransform, flipX: event.target.checked },
-                  },
-                }, `layer-transform:${slide.id}:${selectedLayerId}:flipX`)}
-              />
-              <span>Flip horizontal</span>
-            </label>
-            <label className="transform-flip-control" htmlFor="layer-transform-flip-y">
-              <input
-                id="layer-transform-flip-y"
-                type="checkbox"
-                checked={selectedTransform.flipY}
-                onChange={(event) => onUpdate({
-                  layerTransforms: {
-                    ...slide.layerTransforms,
-                    [selectedLayerId]: { ...selectedTransform, flipY: event.target.checked },
-                  },
-                }, `layer-transform:${slide.id}:${selectedLayerId}:flipY`)}
-              />
-              <span>Flip vertical</span>
-            </label>
-          </div>
+          <LayerArrangeControls
+            slide={slide}
+            selectedLayerId={selectedLayerId}
+            layerBounds={layerBounds}
+            profile={profile}
+            onArrange={onArrange}
+            idPrefix="layer-arrange"
+            scope={arrangeScope}
+            onScopeChange={setArrangeScope}
+          />
+          <LayerTransformControls
+            slide={slide}
+            layerId={selectedLayerId}
+            idPrefix="layer-transform"
+            onUpdate={onUpdate}
+          />
         </section>
 
         <section className="inspector-section">
@@ -553,7 +432,7 @@ export function Inspector({
         <section className="inspector-section">
           <div className="section-label">
             <span>Color theme</span>
-            <span className="section-label__hint">Background</span>
+            <span className="section-label__hint">Palette</span>
           </div>
           <div className="theme-options">
             {themes.map((theme) => (

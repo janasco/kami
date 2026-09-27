@@ -1,10 +1,26 @@
-import { createDefaultAccentShapeStyle, createDefaultLayerSettings, createDefaultLayerTransforms, DEFAULT_SLIDE_TRANSFORM, exportProfiles, layouts as editorLayouts, localeOptions, pendingExportProfiles, resolveDeviceFrameId, sanitizeLayerOpacity, themes as editorThemes, TRANSFORM_SIZE_MAX, TRANSFORM_SIZE_MIN } from '../data'
+import { createDefaultAccentShapeStyle, createDefaultLayerSettings, createDefaultLayerTransforms, DEFAULT_BACKGROUND_FILL, DEFAULT_SLIDE_TRANSFORM, exportProfiles, layouts as editorLayouts, localeOptions, pendingExportProfiles, resolveDeviceFrameId, sanitizeLayerOpacity, slideLayerIds, themes as editorThemes, TRANSFORM_SIZE_MAX, TRANSFORM_SIZE_MIN } from '../data'
+/*
+ * `isSafeAssetPath` used to have a second, looser copy in this file that
+ * accepted a `..` segment, so a hand-edited background pointing outside the
+ * bundle passed restore and was then rejected by validation. Both call sites
+ * now read the one function in `lib/assetPath`; see that file for the rule and
+ * for why the order of its checks is part of it.
+ */
+import { isSafeAssetPath } from './assetPath'
 import { loadAutosavedDocument, saveAutosavedDocument } from './autosave'
+import { clampFocalPoint, isDefaultFocalPoint, resolveBackgroundFill, resolveIntrinsicSize } from './backgroundFill'
+import {
+  createDefaultOutputVariant,
+  DEFAULT_VARIANT_ID,
+  isProfileReadyForVariants,
+  variantsForProfile,
+} from './deviceVariants'
 import { resolveShowDeviceStatusBar } from './deviceStatusBar'
+import { parseLayerOrder, serializeLayerOrder } from './layerOrder'
 import { migrateProjectDocument, type MigrationReport } from './projectMigration'
 import { resolveScreenshotFit } from './screenshotFit'
 import { PROJECT_VERSION, validateProjectDocument, validationSummary, type ValidationReport } from './projectValidation'
-import type { AccentShapeStyle, CanvasMode, DeviceFrameId, ExportProfile, ExportProfileId, LayerId, LayoutId, LocaleId, ScreenshotFit, Slide, SlideTextCopy, SlideTransform, ThemeId } from '../types'
+import type { AccentShapeStyle, BackgroundFill, CanvasMode, DeviceFrameId, DeviceVariantSlideOverride, ExportProfile, ExportProfileId, FocalPoint, LayerId, LayerTransforms, LayoutId, LocaleId, OutputVariant, ScreenshotFit, Slide, SlideTextCopy, SlideTransform, ThemeId } from '../types'
 const CANVAS_ID = 'main-story'
 const AUTHORING_PROFILE = exportProfiles[0]
 const CANVAS_WIDTH = AUTHORING_PROFILE.width
@@ -24,6 +40,14 @@ interface ProjectAsset {
   path: string
   mimeType: string
   sourceName?: string
+  /**
+   * Intrinsic pixel size of the referenced file, written for background assets
+   * so a panoramic fill can compute its overscan before the image has loaded.
+   * A hint only: the renderer re-measures, and a document without one renders
+   * as a plain cover.
+   */
+  width?: number
+  height?: number
 }
 
 interface ProjectFile {
@@ -69,12 +93,30 @@ interface ProjectFile {
     deviceFrameId: DeviceFrameId
     showDeviceStatusBar: boolean
     screenshotFit: ScreenshotFit
+    /**
+     * Optional background fill. Absent means the theme, so a deck that never
+     * touched a fill keeps saving the document it always saved.
+     */
+    backgroundFill?: BackgroundFill
     transform: SlideTransform
+    /**
+     * Optional stacking order, written only when a slide has reordered its
+     * layers. Absent means the catalog order, so the field adds no requirement
+     * to an existing project and needs no version bump.
+     */
+    layerOrder?: LayerId[]
     layers: Array<{
       id: string
       type: 'text' | 'image' | 'shape'
       textKey?: string
       assetId?: string
+      /**
+       * Normalized focal point of an image layer, written only when it differs
+       * from the centre. The `background-image` layer is the only one that uses
+       * it today, and the key stays on the layer so a focal point is a property
+       * of the image rather than of the slide.
+       */
+      focalPoint?: FocalPoint
       frame: Frame
       zIndex: number
       transform: SlideTransform
@@ -105,6 +147,20 @@ interface ProjectFile {
     slideIds: string[]
     enabled: boolean
     exportProfileId?: ExportProfileId
+    /**
+     * Per-device differences, written only when at least one slide has one. The
+     * editor model stores a capture as bytes and the document stores an asset
+     * id, so a capture shared by two variants is one asset rather than two
+     * copies of the same base64 in one JSON file.
+     */
+    deviceOverrides?: Array<{
+      slideId: string
+      deviceFrameId?: DeviceFrameId
+      showDeviceStatusBar?: boolean
+      screenshotFit?: ScreenshotFit
+      assetId?: string
+      layerTransforms?: Partial<Record<LayerId, SlideTransform>>
+    }>
   }>
   exportProfiles: Array<{
     id: string
@@ -124,6 +180,16 @@ export interface EditorProject {
   activeLocale: LocaleId
   canvasMode: CanvasMode
   selectedExportProfileId: ExportProfileId
+  /**
+   * The deck's output variants, in document order.
+   *
+   * Optional and additive. Absent means the single default variant, which is the
+   * record the serializer hard-coded before this field existed, so a deck that
+   * never used a device variant keeps producing the identical document. Absent
+   * rather than an empty array, so "never used the feature" and "used it and
+   * deleted everything" cannot produce the same bytes.
+   */
+  outputVariants?: OutputVariant[]
 }
 
 export type ProjectParseResult =
@@ -151,6 +217,48 @@ const mimeTypeFor = (path: string, name: string | null) => {
   return 'application/octet-stream'
 }
 
+/**
+ * The per-device layer transforms worth storing, and nothing else.
+ *
+ * A transform that resolves back to the slide's own is dropped, so clearing a
+ * device override in the editor removes the field and the document returns to
+ * the shape it had before the override existed. Unusable values are dropped for
+ * the same reason: a stored `NaN` would survive JSON and re-enter the renderer.
+ */
+const serializeVariantLayerTransforms = (
+  slide: Slide,
+  overrides: Partial<Record<LayerId, SlideTransform>> | undefined,
+): Partial<Record<LayerId, SlideTransform>> | undefined => {
+  if (!overrides) return undefined
+  const result: Partial<Record<LayerId, SlideTransform>> = {}
+  let count = 0
+  for (const [layerId, transform] of Object.entries(overrides) as Array<[LayerId, SlideTransform]>) {
+    if (!slide.layerTransforms[layerId] || !transform) continue
+    if (!isUsableTransform(transform)) continue
+    if (isSameTransform(slide.layerTransforms[layerId], transform)) continue
+    result[layerId] = { ...transform }
+    count += 1
+  }
+  return count > 0 ? result : undefined
+}
+
+const isUsableTransform = (transform: SlideTransform): boolean =>
+  [transform.x, transform.y, transform.scale, transform.rotation, transform.widthScale, transform.heightScale]
+    .every((value) => typeof value === 'number' && Number.isFinite(value))
+  && transform.scale > 0
+  && typeof transform.flipX === 'boolean'
+  && typeof transform.flipY === 'boolean'
+
+const isSameTransform = (a: SlideTransform, b: SlideTransform): boolean =>
+  a.x === b.x
+  && a.y === b.y
+  && a.scale === b.scale
+  && a.rotation === b.rotation
+  && a.widthScale === b.widthScale
+  && a.heightScale === b.heightScale
+  && a.flipX === b.flipX
+  && a.flipY === b.flipY
+
 export function serializeProject(project: EditorProject): ProjectFile {
   const assets: ProjectAsset[] = []
   const assetIdsByPath = new Map<string, string>()
@@ -158,6 +266,21 @@ export function serializeProject(project: EditorProject): ProjectFile {
   const iconAssetIds = new Map<string, string | null>()
   const backgroundAssetIds = new Map<string, string | null>()
   const messages: Record<string, Record<string, string>> = {}
+
+  /**
+   * One asset for a set of bytes, shared by every reference to it.
+   *
+   * Variant captures go through the same map as slide captures, so a capture a
+   * variant shares with its slide, or with another variant, is stored once.
+   */
+  const assetIdForPath = (path: string, name: string | null, kind: ProjectAsset['kind']) => {
+    const existing = assetIdsByPath.get(path)
+    if (existing) return existing
+    const id = `asset-${assets.length + 1}`
+    assets.push({ id, kind, path, mimeType: mimeTypeFor(path, name), sourceName: name ?? undefined })
+    assetIdsByPath.set(path, id)
+    return id
+  }
 
   project.slides.forEach((slide) => {
     const titleKey = `${slide.id}.title`
@@ -175,19 +298,7 @@ export function serializeProject(project: EditorProject): ProjectFile {
     if (!slide.screenshot) {
       screenshotAssetIds.set(slide.id, null)
     } else {
-      let assetId = assetIdsByPath.get(slide.screenshot)
-      if (!assetId) {
-        assetId = `asset-${assets.length + 1}`
-        assets.push({
-          id: assetId,
-          kind: 'screenshot',
-          path: slide.screenshot,
-          mimeType: mimeTypeFor(slide.screenshot, slide.screenshotName),
-          sourceName: slide.screenshotName ?? undefined,
-        })
-        assetIdsByPath.set(slide.screenshot, assetId)
-      }
-      screenshotAssetIds.set(slide.id, assetId)
+      screenshotAssetIds.set(slide.id, assetIdForPath(slide.screenshot, slide.screenshotName, 'screenshot'))
     }
 
     if (!slide.appIcon) {
@@ -208,12 +319,16 @@ export function serializeProject(project: EditorProject): ProjectFile {
       backgroundAssetIds.set(slide.id, null)
     } else {
       const assetId = `asset-${assets.length + 1}`
+      const intrinsic = resolveIntrinsicSize(slide.backgroundImage)
       assets.push({
         id: assetId,
         kind: 'other',
         path: slide.backgroundImage.dataUrl,
         mimeType: slide.backgroundImage.mimeType || mimeTypeFor(slide.backgroundImage.dataUrl, slide.backgroundImage.name),
         sourceName: slide.backgroundImage.name || undefined,
+        // Written only when both numbers are usable, so a document never claims
+        // a size nobody measured.
+        ...(intrinsic ? { width: intrinsic.width, height: intrinsic.height } : {}),
       })
       backgroundAssetIds.set(slide.id, assetId)
     }
@@ -258,6 +373,85 @@ export function serializeProject(project: EditorProject): ProjectFile {
       : scaledFrame(source)
   const slideIds = project.slides.map((slide) => slide.id)
 
+  /*
+   * The output variants.
+   *
+   * This used to be one hard-coded record, unconditionally, which meant every
+   * autosave collapsed whatever the author or a hand-edited file had written. An
+   * absent list is not "collapse it": it is the shape a project that never used
+   * a device variant has always had, and it is written through the same code
+   * path as before so the bytes do not move.
+   */
+  const authoredVariants = project.outputVariants
+  const variants: OutputVariant[] = authoredVariants && authoredVariants.length > 0
+    ? authoredVariants
+    : [createDefaultOutputVariant({
+      slideIds,
+      locale: project.activeLocale,
+      themeId: primaryTheme,
+      exportProfileId: selectedProfile.id,
+    })]
+
+  /*
+   * Whether the variant set is still the shape every pre-variant project has.
+   *
+   * That record is a legacy shape: one variant named after the locale, and every
+   * supported profile linked to it whether or not it named that profile. Deriving
+   * `variantIds` from it instead would empty five of six profiles and rewrite
+   * every existing project on its next autosave, so a document that is still the
+   * legacy shape is written as the legacy shape. The moment a second variant
+   * exists, or the default one is renamed, disabled, given overrides, or no
+   * longer covers the whole deck, the links become real.
+   */
+  const isLegacyDefaultVariantSet = (() => {
+    if (variants.length !== 1) return false
+    const [only] = variants
+    return only.id === DEFAULT_VARIANT_ID
+      && only.enabled
+      && only.slideIds.length === slideIds.length
+      && only.slideIds.every((id, index) => id === slideIds[index])
+      && only.exportProfileId === selectedProfile.id
+      && (only.deviceOverrides?.length ?? 0) === 0
+  })()
+
+  const serializedVariants: ProjectFile['outputVariants'] = variants.map((variant) => {
+    const overrides = (variant.deviceOverrides ?? [])
+      .filter((override) => override && typeof override.slideId === 'string' && override.slideId.length > 0)
+      .map((override) => {
+        const source = project.slides.find((slide) => slide.id === override.slideId)
+        const layerTransforms = source
+          ? serializeVariantLayerTransforms(source, override.layerTransforms)
+          : undefined
+        return {
+          slideId: override.slideId,
+          // Normalized on the way out, so a variant can only ever carry a
+          // current catalog spelling, exactly as a slide does.
+          ...(override.deviceFrameId !== undefined ? { deviceFrameId: resolveDeviceFrameId(override.deviceFrameId) } : {}),
+          ...(typeof override.showDeviceStatusBar === 'boolean' ? { showDeviceStatusBar: override.showDeviceStatusBar } : {}),
+          ...(override.screenshotFit !== undefined ? { screenshotFit: resolveScreenshotFit(override.screenshotFit) } : {}),
+          ...(override.screenshot?.dataUrl
+            ? { assetId: assetIdForPath(override.screenshot.dataUrl, override.screenshot.name, 'screenshot') }
+            : {}),
+          ...(layerTransforms ? { layerTransforms } : {}),
+        }
+      })
+      .filter((override) => Object.keys(override).length > 1)
+
+    return {
+      id: variant.id,
+      name: variant.name,
+      canvasId: variant.canvasId,
+      locale: variant.locale,
+      themeId: variant.themeId,
+      slideIds: [...variant.slideIds],
+      enabled: variant.enabled,
+      exportProfileId: variant.exportProfileId,
+      // Absent, not an empty array, when nothing is customised: an untouched
+      // deck must not grow a field.
+      ...(overrides.length > 0 ? { deviceOverrides: overrides } : {}),
+    }
+  })
+
   return {
     $schema: './schemas/screenshot-studio.v1.json',
     version: PROJECT_VERSION,
@@ -282,6 +476,10 @@ export function serializeProject(project: EditorProject): ProjectFile {
       unit: 'px',
       origin: 'top-left',
       coordinateSpace: 'global',
+      // The authoring canvas: one profile frame per slide, and never a count of
+      // variant renders. A two-variant deck renders twice as many PNGs but
+      // authors one scene, and a `scene.width` that grew with the variants would
+      // desynchronise the document from the deck the editor holds.
       width: selectedProfile.width * Math.max(1, project.slides.length),
       height: selectedProfile.height,
     },
@@ -298,11 +496,17 @@ export function serializeProject(project: EditorProject): ProjectFile {
       const appIconAssetId = iconAssetIds.get(slide.id)
       const backgroundAssetId = backgroundAssetIds.get(slide.id)
       const layerOpacity = (layerId: LayerId) => sanitizeLayerOpacity(slide.layerSettings[layerId].opacity)
+      const slideLayerOrder = serializeLayerOrder(slide.layerOrder)
+      const backgroundFill = resolveBackgroundFill(slide.backgroundFill)
+      // The centre is the CSS default and the value a document leaves out, so a
+      // focal point is written only when the author actually moved it.
+      const backgroundFocalPoint = clampFocalPoint(slide.backgroundFocalPoint)
       const layers: ProjectFile['slides'][number]['layers'] = [
         {
           id: 'background-image',
           type: 'image',
           ...(backgroundAssetId ? { assetId: backgroundAssetId } : {}),
+          ...(!isDefaultFocalPoint(backgroundFocalPoint) ? { focalPoint: backgroundFocalPoint } : {}),
           frame: layerFrame(slide, 'background-image', frame(0, 0)),
           zIndex: 0,
           transform: { ...slide.layerTransforms['background-image'] },
@@ -392,6 +596,12 @@ export function serializeProject(project: EditorProject): ProjectFile {
         showDeviceStatusBar: slide.showDeviceStatusBar,
         screenshotFit: slide.screenshotFit,
         transform: { ...slide.transform },
+        // Omitted for a slide still on the theme fill, so an untouched deck keeps
+        // saving the document it always saved.
+        ...(backgroundFill.kind !== DEFAULT_BACKGROUND_FILL ? { backgroundFill } : {}),
+        // Omitted for a slide that has not reordered anything, so an untouched
+        // deck keeps saving the document it always saved.
+        ...(slideLayerOrder ? { layerOrder: slideLayerOrder } : {}),
         layers,
       }
     }),
@@ -425,35 +635,44 @@ export function serializeProject(project: EditorProject): ProjectFile {
           },
         },
       })),
-    outputVariants: [
-      {
-        id: 'variant-en-us',
-        name: 'English',
-        canvasId: CANVAS_ID,
-        locale: project.activeLocale,
-        themeId: primaryTheme,
-        slideIds,
-        enabled: true,
-        exportProfileId: selectedProfile.id,
-      },
-    ],
-    exportProfiles: [...exportProfiles, ...pendingExportProfiles].map((profile) => ({
-      id: profile.id,
-      name: profile.name,
-      orientation: profile.orientation,
-      format: profile.format,
-      sizes: [{ width: profile.width, height: profile.height }],
-      variantIds: pendingExportProfiles.some((pendingProfile) => pendingProfile.id === profile.id)
+    outputVariants: serializedVariants,
+    /*
+     * The profiles, with `variantIds` and `status` derived from the variants
+     * rather than hard-coded.
+     *
+     * `status` used to be `slides.every(s => s.screenshot)` over the base deck,
+     * which reported a profile as ready while a variant with no capture was
+     * quietly exporting a placeholder. It is now `ready` only when *every enabled
+     * variant targeting the profile* is complete, and a pending profile stays
+     * `planned` with no variants at all.
+     */
+    exportProfiles: [...exportProfiles, ...pendingExportProfiles].map((profile) => {
+      const isPending = pendingExportProfiles.some((pendingProfile) => pendingProfile.id === profile.id)
+      const variantIds = isPending
         ? []
-        : ['variant-en-us'],
-      status: pendingExportProfiles.some((pendingProfile) => pendingProfile.id === profile.id)
-        ? 'planned'
-        : (profile.preflight?.requirements.screenshot === false
-            || project.slides.every((slide) => Boolean(slide.screenshot))
-          ? 'ready'
-          : 'needs-assets'),
-      selected: profile.id === selectedProfile.id,
-    })),
+        : isLegacyDefaultVariantSet
+          ? [variants[0].id]
+          : variantsForProfile(variants, profile.id as ExportProfileId).map((entry) => entry.id)
+      return {
+        id: profile.id,
+        name: profile.name,
+        orientation: profile.orientation,
+        format: profile.format,
+        sizes: [{ width: profile.width, height: profile.height }],
+        variantIds,
+        status: isPending
+          ? 'planned' as const
+          : isProfileReadyForVariants(
+            project.slides,
+            variants,
+            profile.id as ExportProfileId,
+            profile.preflight?.requirements.screenshot !== false,
+          )
+            ? 'ready' as const
+            : 'needs-assets' as const,
+        selected: profile.id === selectedProfile.id,
+      }
+    }),
   }
 }
 
@@ -470,16 +689,19 @@ const isValidFrame = (value: unknown): value is Frame =>
   typeof value.width === 'number' && Number.isFinite(value.width) && value.width > 0 &&
   typeof value.height === 'number' && Number.isFinite(value.height) && value.height > 0
 
-const isSafeAssetPath = (path: string) =>
-  /^data:image\/(?:png|jpeg|webp|svg\+xml);base64,/i.test(path) ||
-  /^(?:https?:\/\/|blob:)/i.test(path) ||
-  (!/^[a-z][a-z\d+.-]*:/i.test(path) && !/[\u0000-\u001f]/.test(path))
-
 const supportedLayout = (value: string): LayoutId =>
   editorLayouts.some((layout) => layout.id === value) ? value as LayoutId : 'hero'
 
 const supportedTheme = (value: string): ThemeId =>
   editorThemes.some((theme) => theme.id === value) ? value as ThemeId : 'midnight'
+
+/** Whether a stored theme id names a theme this editor has. */
+const supportedThemeId = (value: unknown): value is ThemeId =>
+  typeof value === 'string' && editorThemes.some((theme) => theme.id === value)
+
+/** Whether a stored locale id names a locale this editor has. */
+const isKnownLocale = (value: unknown): value is LocaleId =>
+  typeof value === 'string' && localeOptions.some((locale) => locale.id === value)
 
 const parseTransform = (value: unknown): SlideTransform => {
   if (!isRecord(value)) return { ...DEFAULT_SLIDE_TRANSFORM }
@@ -621,7 +843,7 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
         !hasString(asset, 'kind') ||
         !hasString(asset, 'path') ||
         typeof asset.mimeType !== 'string' ||
-        !isSafeAssetPath(asset.path)
+        !isSafeAssetPath(asset.path as unknown)
       ) {
         return { ok: false, error: 'An asset is missing required fields or has an unsafe path.' }
       }
@@ -634,8 +856,6 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
   if (localization !== null && !isRecord(localization)) {
     return { ok: false, error: 'The localization field must be an object.' }
   }
-  const isKnownLocale = (id: unknown): id is LocaleId =>
-    typeof id === 'string' && localeOptions.some((locale) => locale.id === id)
   const activeLocale = isKnownLocale(project.activeLocale) ? project.activeLocale : DEFAULT_LOCALE
 
   const slideIds = new Set<string>()
@@ -667,6 +887,7 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
     let accentShapeStyle = createDefaultAccentShapeStyle()
     let appIcon: Slide['appIcon'] = null
     let backgroundImage: Slide['backgroundImage'] = null
+    let backgroundFocalPoint: FocalPoint | undefined
     let screenshot: string | null = null
     let screenshotName: string | null = null
 
@@ -690,6 +911,12 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
         }
         if (semanticLayerId === 'accent-shape') accentShapeStyle = parseAccentShapeStyle(layer.style)
       }
+      if (semanticLayerId === 'background-image' && layer.focalPoint !== undefined) {
+        // Clamped on read, and a focal point that lands on the centre is dropped
+        // so re-saving the document does not add a field nobody asked for.
+        const focalPoint = clampFocalPoint(layer.focalPoint)
+        if (!isDefaultFocalPoint(focalPoint)) backgroundFocalPoint = focalPoint
+      }
       if (layer.type === 'text') {
         if (typeof layer.textKey !== 'string' || layer.textKey.length === 0) {
           return { ok: false, error: `Slide ${slide.id} contains a text layer without a text key.` }
@@ -710,12 +937,21 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
           ? asset.mimeType
           : mimeTypeFor(assetPath, assetName)
         if (semanticLayerId === 'background-image') {
-          if (/^image\/(?:png|jpeg|webp)$/i.test(assetMimeType)) {
-            backgroundImage = {
-              name: assetName,
-              dataUrl: assetPath,
-              mimeType: assetMimeType,
-            }
+          /*
+           * No mime filter here. Every asset has already passed the path
+           * validator above, which is the security boundary, and the renderer
+           * degrades to the theme paint when the browser cannot draw a file, so
+           * restoring a permitted background is strictly better than guessing
+           * from its type. Filtering to raster types silently discarded
+           * `image/svg+xml`, which the validator and the JSON Schema both allow
+           * and which the demo project ships.
+           */
+          const intrinsic = resolveIntrinsicSize(asset)
+          backgroundImage = {
+            name: assetName,
+            dataUrl: assetPath,
+            mimeType: assetMimeType,
+            ...(intrinsic ? { width: intrinsic.width, height: intrinsic.height } : {}),
           }
         } else if (semanticLayerId === 'app-icon' || (!semanticLayerId && asset.kind === 'icon')) {
           appIcon = {
@@ -739,6 +975,15 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
     const subtitleMessages = getMessages(localization as JsonRecord | null, subtitleKey)
 
     const deviceFrameId = resolveDeviceFrameId(slide.deviceFrameId)
+    // Optional and additive: a project without the field, or with a partial or
+    // stale one, resolves to the catalog order rather than being rejected.
+    const layerOrder = parseLayerOrder(slide.layerOrder)
+    /*
+     * Both are optional and additive. An absent or unusable fill resolves to the
+     * theme and resolves to no record at all, so a slide the author never
+     * restyled still serializes without the field.
+     */
+    const backgroundFill = resolveBackgroundFill(slide.backgroundFill)
 
     restoredSlides.push({
       id: slide.id,
@@ -752,8 +997,11 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
       showDeviceStatusBar: resolveShowDeviceStatusBar(deviceFrameId, slide.showDeviceStatusBar),
       // Older projects predate the field; contain keeps the capture uncropped.
       screenshotFit: resolveScreenshotFit(slide.screenshotFit),
+      ...(backgroundFill.kind !== DEFAULT_BACKGROUND_FILL ? { backgroundFill } : {}),
+      ...(backgroundFocalPoint ? { backgroundFocalPoint } : {}),
       transform: parseTransform(slide.transform),
       layerTransforms,
+      ...(layerOrder ? { layerOrder } : {}),
       layerSettings,
       accentShapeStyle,
       appIcon,
@@ -766,16 +1014,36 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
   const firstCanvas = value.canvases[0]
   const isKnownProfileId = (id: unknown): id is ExportProfileId =>
     typeof id === 'string' && exportProfiles.some((profile) => profile.id === id)
-  const variantProfile = Array.isArray(value.outputVariants)
-    ? value.outputVariants.find((variant) => isRecord(variant) && isKnownProfileId(variant.exportProfileId))
-    : undefined
+
+  const restoredVariants = restoreOutputVariants(value.outputVariants, {
+    assets,
+    canvasIds,
+    slideIds,
+    isKnownProfileId,
+  })
+
+  /*
+   * Which profile the editor opens on.
+   *
+   * The authority is `selected === true` on the profile, and only that. It used
+   * to be "the first profile with selected === true, then the first variant with
+   * a known exportProfileId", and with one variant the two agreed by accident.
+   * With N variants "first match" is arbitrary, so the fallback is now
+   * deterministic: the first **enabled** variant in array order, and nothing
+   * else. A document where several profiles claim selection resolves to the
+   * first of them, in document order, rather than to whichever the code happened
+   * to reach.
+   */
   const selectedProfile = Array.isArray(value.exportProfiles)
     ? value.exportProfiles.find((profile) => isRecord(profile) && profile.selected === true)
     : undefined
+  const firstEnabledVariantProfile = restoredVariants.find(
+    (variant) => variant.enabled && isKnownProfileId(variant.exportProfileId),
+  )
   const selectedExportProfileId = isKnownProfileId(selectedProfile?.id)
     ? selectedProfile.id
-    : isKnownProfileId(variantProfile?.exportProfileId)
-      ? variantProfile.exportProfileId
+    : isKnownProfileId(firstEnabledVariantProfile?.exportProfileId)
+      ? firstEnabledVariantProfile.exportProfileId
       : exportProfiles.some((profile) => profile.id === 'app-store')
         ? 'app-store'
         : exportProfiles[0].id
@@ -788,8 +1056,124 @@ const restoreProject = (value: Record<string, unknown>): RestoredProjectResult =
       activeLocale,
       canvasMode: firstCanvas.mode,
       selectedExportProfileId,
+      // Absent, not an empty array, for a project with no variants, so the
+      // editor can tell "never used the feature" from "deleted everything" and
+      // serialize the first back to the record it always wrote.
+      ...(restoredVariants.length > 0 ? { outputVariants: restoredVariants } : {}),
     },
   }
+}
+
+interface RestoreVariantContext {
+  assets: Map<string, JsonRecord>
+  canvasIds: Set<string>
+  slideIds: Set<string>
+  isKnownProfileId: (id: unknown) => id is ExportProfileId
+}
+
+/**
+ * Reads the output variants, or returns nothing.
+ *
+ * Optional and additive, so a project that never had variants restores exactly
+ * as it did. A record that is present but unusable is dropped rather than
+ * rejected, because a variant is a delivery target and a broken one must not
+ * cost the author the deck. The document validator is the place that reports it.
+ */
+const restoreOutputVariants = (value: unknown, context: RestoreVariantContext): OutputVariant[] => {
+  if (!Array.isArray(value)) return []
+  const restored: OutputVariant[] = []
+  const seen = new Set<string>()
+
+  for (const entry of value) {
+    if (!isRecord(entry)) continue
+    const id = entry.id
+    if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue
+    if (typeof entry.name !== 'string' || entry.name.length === 0) continue
+    if (typeof entry.canvasId !== 'string' || !context.canvasIds.has(entry.canvasId)) continue
+    if (!isKnownLocale(entry.locale)) continue
+    if (!supportedThemeId(entry.themeId)) continue
+    if (!Array.isArray(entry.slideIds)) continue
+    if (!context.isKnownProfileId(entry.exportProfileId)) continue
+
+    const slideIdList: string[] = []
+    for (const slideId of entry.slideIds) {
+      if (typeof slideId === 'string' && context.slideIds.has(slideId) && !slideIdList.includes(slideId)) slideIdList.push(slideId)
+    }
+    if (slideIdList.length === 0) continue
+
+    const deviceOverrides = restoreDeviceOverrides(entry.deviceOverrides, context)
+    seen.add(id)
+    restored.push({
+      id,
+      name: entry.name,
+      canvasId: entry.canvasId,
+      locale: entry.locale,
+      themeId: entry.themeId,
+      slideIds: slideIdList,
+      // Absent means enabled, matching the schema's required flag and the
+      // preflight semantics: a variant is exported unless it says otherwise.
+      enabled: entry.enabled !== false,
+      exportProfileId: entry.exportProfileId,
+      ...(deviceOverrides.length > 0 ? { deviceOverrides } : {}),
+    })
+  }
+
+  return restored
+}
+
+/**
+ * Reads the per-device overrides of one variant.
+ *
+ * An override naming a slide the variant does not render, or naming no field at
+ * all, is dropped: it would otherwise be a record of nothing. A device frame is
+ * resolved through the same alias table a slide uses, so a variant cannot carry
+ * an older spelling the slide could not.
+ */
+const restoreDeviceOverrides = (value: unknown, context: RestoreVariantContext): DeviceVariantSlideOverride[] => {
+  if (!Array.isArray(value)) return []
+  const overrides: DeviceVariantSlideOverride[] = []
+
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.slideId !== 'string' || entry.slideId.length === 0) continue
+    const override: DeviceVariantSlideOverride = { slideId: entry.slideId }
+
+    if (entry.deviceFrameId !== undefined) override.deviceFrameId = resolveDeviceFrameId(entry.deviceFrameId)
+    if (typeof entry.showDeviceStatusBar === 'boolean') override.showDeviceStatusBar = entry.showDeviceStatusBar
+    if (entry.screenshotFit !== undefined) override.screenshotFit = resolveScreenshotFit(entry.screenshotFit)
+
+    if (typeof entry.assetId === 'string') {
+      const asset = context.assets.get(entry.assetId)
+      if (asset && typeof asset.path === 'string' && isSafeAssetPath(asset.path)) {
+        const name = typeof asset.sourceName === 'string' && asset.sourceName.length > 0
+          ? asset.sourceName
+          : `${entry.slideId}.png`
+        override.screenshot = {
+          name,
+          dataUrl: asset.path,
+          mimeType: typeof asset.mimeType === 'string' && asset.mimeType.length > 0
+            ? asset.mimeType
+            : mimeTypeFor(asset.path, name),
+        }
+      }
+    }
+
+    if (isRecord(entry.layerTransforms)) {
+      const layerTransforms: Partial<LayerTransforms> = {}
+      let count = 0
+      for (const [layerId, transform] of Object.entries(entry.layerTransforms)) {
+        if (!slideLayerIds.includes(layerId as LayerId)) continue
+        const parsed = parseTransform(transform)
+        layerTransforms[layerId as LayerId] = parsed
+        count += 1
+      }
+      if (count > 0) override.layerTransforms = layerTransforms
+    }
+
+    // `slideId` alone is not an override; the serializer never writes one.
+    if (Object.keys(override).length > 1) overrides.push(override)
+  }
+
+  return overrides
 }
 
 const parseProject = (value: unknown): ProjectParseResult => {

@@ -116,6 +116,44 @@ describe('evaluateFlowboardStages', () => {
     expect(stateOf(input, 'frame')).toBe('attention')
   })
 
+  it('reads every slide on the theme fill when no slide has a fill record', () => {
+    const facts = collectFlowboardDeckFacts(deckInput())
+    expect(facts.backgroundFills).toEqual(['theme'])
+    expect(facts.mixedBackgroundFill).toBe(false)
+  })
+
+  it('flags mixed background fills across the deck', () => {
+    const input = deckInput({
+      slides: [
+        withCapture(starterSlide),
+        withCapture({ ...createSlide(), title: 'Second beat' }, { backgroundFill: { kind: 'gradient' } }),
+      ],
+    })
+    const facts = collectFlowboardDeckFacts(input)
+    expect(facts.backgroundFills.sort()).toEqual(['gradient', 'theme'])
+    expect(facts.mixedBackgroundFill).toBe(true)
+    expect(stateOf(input, 'frame')).toBe('attention')
+    expect(getFlowboardStageSummary(evaluateFlowboardStages(input), 'frame').detail)
+      .toContain('Background fills differ across the deck')
+  })
+
+  it('counts a background fill on a slide that is still waiting for its capture', () => {
+    const facts = collectFlowboardDeckFacts(deckInput({
+      slides: [withCapture(starterSlide), { ...createSlide(), title: 'Second beat', backgroundFill: { kind: 'gradient' } }],
+    }))
+    expect(facts.mixedBackgroundFill).toBe(true)
+    // The missing capture is the more urgent gap, so it wins the detail line.
+    expect(getFlowboardStageSummary(evaluateFlowboardStages(deckInput({
+      slides: [withCapture(starterSlide), { ...createSlide(), title: 'Second beat', backgroundFill: { kind: 'gradient' } }],
+    })), 'frame').detail).toContain('still needs a capture')
+  })
+
+  it('names the background fill on a capture card', () => {
+    expect(summarizeCapture(starterSlide).fillLabel).toBe('Theme')
+    expect(summarizeCapture(withCapture(starterSlide, { backgroundFill: { kind: 'panoramic', blend: 'screen' } })).fillLabel)
+      .toBe('Panoramic')
+  })
+
   it('asks for a headline on any beat that has none', () => {
     const input = deckInput({
       slides: [withCapture(starterSlide), withCapture({ ...createSlide(), title: '  ' })],
@@ -200,6 +238,7 @@ describe('summarizeCapture', () => {
       deviceName: 'iPhone',
       fitLabel: 'Contain',
       statusBarLabel: 'Status bar on',
+      fillLabel: 'Theme',
       framed: true,
     })
   })
@@ -209,6 +248,7 @@ describe('summarizeCapture', () => {
       deviceName: 'No frame',
       fitLabel: 'Cover',
       statusBarLabel: 'No frame, no chrome',
+      fillLabel: 'Theme',
       framed: false,
     })
   })

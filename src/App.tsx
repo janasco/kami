@@ -18,26 +18,51 @@ import {
   serializeProject,
 } from './lib/project'
 import { exportSlidesAsZip } from './lib/exportSlides'
+import { planExportEntries, variantExportRefusal } from './lib/exportPlan'
 import {
   collectExportPreflightBounds,
   runExportPreflight,
   type PreflightLayerBoundsBySlide,
 } from './lib/exportPreflight'
+import { createDefaultOutputVariant, enabledVariantsForProfile, expandVariantRenders } from './lib/deviceVariants'
 import { createSlidesFromProjectTemplate, type ProjectTemplate } from './lib/projectTemplates'
 import { createDemoProject } from './lib/demoProject'
 import { applyBulkSlideAction, bulkActionMergeKey, describeBulkSlideResult, type BulkSlideAction } from './lib/flowboardBulkEdit'
+import { applyLayerArrange, layerArrangeMergeKey, type LayerArrangeAction } from './lib/layerArrange'
+import { applySlideStyleToDeck } from './lib/slideStyle'
 import {
   readScreenshotFile,
   validateScreenshotFiles,
   type ScreenshotImportItem,
 } from './lib/screenshotImport'
+import { planScreenshotDrop, type KamiCapturePayload } from './lib/screenshotDrop'
 import { hasCompletedOnboarding, markOnboardingComplete } from './lib/onboarding'
 import { readEditorMode, resolveInitialEditorMode, writeEditorMode, type EditorMode } from './lib/editorMode'
 import { applySlideTextUpdateToSlides, type SlideTextField } from './lib/localization'
-import type { CanvasMode, ExportProfileId, LayerId, LocaleId, Slide, SlideTransform } from './types'
+import type { CanvasMode, CaptureAsset, DeviceVariantSlideOverride, ExportProfileId, LayerId, LocaleId, OutputVariant, ScreenshotFit, Slide, SlideTransform } from './types'
 
 const HISTORY_LIMIT = 50
 const TEXT_HISTORY_COALESCE_MS = 750
+
+/**
+ * Reads the intrinsic pixel size of an image data URL.
+ *
+ * A hint, not a requirement: a data URL the browser refuses to decode resolves
+ * to null and the import proceeds without one, because a backdrop with no known
+ * aspect is still a perfectly good backdrop — the canvas just falls back to a
+ * plain cover instead of guessing a crop.
+ */
+const measureIntrinsicSize = (dataUrl: string): Promise<{ width: number; height: number } | null> =>
+  new Promise((resolve) => {
+    const image = new Image()
+    image.onload = () => resolve(
+      image.naturalWidth > 0 && image.naturalHeight > 0
+        ? { width: image.naturalWidth, height: image.naturalHeight }
+        : null,
+    )
+    image.onerror = () => resolve(null)
+    image.src = dataUrl
+  })
 
 /** UI-only view choice. The Flowboard is the Full Editor experience. */
 type EditorView = 'flowboard' | 'classic'
@@ -49,6 +74,12 @@ interface EditorState {
   activeLocale: LocaleId
   canvasMode: CanvasMode
   exportProfileId: ExportProfileId
+  /**
+   * The deck's output variants. Absent means the single default variant, which
+   * is what every project authored before device variants has, so the field
+   * never appears in a document that has no reason to carry it.
+   */
+  outputVariants?: OutputVariant[]
 }
 
 interface HistoryEntry {
@@ -74,6 +105,15 @@ function App() {
   const historyRef = useRef<EditorHistory>({ past: [], future: [] })
   const lastHistoryChangeRef = useRef<{ mergeKey: string; recordedAt: number } | null>(null)
   const [, setHistoryVersion] = useState(0)
+  /**
+   * The layer and the measured boxes are read by callbacks that must not be
+   * rebuilt on every state change, so both are mirrored into refs alongside the
+   * editor state they belong to.
+   */
+  const selectedLayerIdRef = useRef(selectedLayerId)
+  selectedLayerIdRef.current = selectedLayerId
+  const preflightBoundsRef = useRef<PreflightLayerBoundsBySlide>({})
+  const arrangeTokenRef = useRef(0)
   const {
     projectName,
     slides,
@@ -81,6 +121,7 @@ function App() {
     activeLocale,
     canvasMode,
     exportProfileId,
+    outputVariants,
   } = editor
   const exportProfile = exportProfiles.find((profile) => profile.id === exportProfileId) ?? exportProfiles[0]
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>('loading')
@@ -115,26 +156,80 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const iconInputRef = useRef<HTMLInputElement>(null)
   const backgroundInputRef = useRef<HTMLInputElement>(null)
+  const variantCaptureInputRef = useRef<HTMLInputElement>(null)
   const projectInputRef = useRef<HTMLInputElement>(null)
   const importTargetIdRef = useRef<string | null>(null)
   const iconImportTargetIdRef = useRef<string | null>(null)
   const backgroundImportTargetIdRef = useRef<string | null>(null)
+  /** Which variant and slide the variant-capture picker is filling. */
+  const variantCaptureTargetRef = useRef<{ variantId: string; slideId: string } | null>(null)
   const autosaveRunRef = useRef(0)
   const [preflightBounds, setPreflightBounds] = useState<PreflightLayerBoundsBySlide>({})
+  preflightBoundsRef.current = preflightBounds
+  /**
+   * The variants the editor renders and exports.
+   *
+   * A deck with none is not "no variants": it is the one default variant every
+   * project has always had. Deriving it here rather than in each reader means
+   * the preflight, the export plan, and the stage switcher cannot disagree about
+   * whether a deck has a device variant.
+   */
+  const variants = useMemo<OutputVariant[]>(() => (outputVariants && outputVariants.length > 0
+    ? outputVariants
+    : [createDefaultOutputVariant({
+      slideIds: slides.map((slide) => slide.id),
+      locale: activeLocale,
+      themeId: slides[0]?.theme ?? 'midnight',
+      exportProfileId,
+    })]), [activeLocale, exportProfileId, outputVariants, slides])
+  const [previewVariantId, setPreviewVariantId] = useState<string>('')
+  const previewVariant = useMemo(
+    () => variants.find((variant) => variant.id === previewVariantId) ?? variants[0],
+    [previewVariantId, variants],
+  )
   const preflight = useMemo(() => runExportPreflight({
     profile: exportProfile,
     slides,
     activeLocale,
     layerBounds: preflightBounds,
-  }), [activeLocale, exportProfile, preflightBounds, slides])
+    variants,
+  }), [activeLocale, exportProfile, preflightBounds, slides, variants])
+
+  /**
+   * The files this export will write, in order.
+   *
+   * One plan feeds the store preview, the preflight, the off-screen export
+   * stage, and the ZIP, so what the author is shown is what lands in the bundle.
+   */
+  const exportPlan = useMemo(() => planExportEntries({
+    slides,
+    variants,
+    profileId: exportProfile.id,
+    requiresScreenshot: exportProfile.preflight?.requirements.screenshot !== false,
+  }), [exportProfile.id, exportProfile.preflight, slides, variants])
+
+  /**
+   * Which slide each export node belongs to, for the measurement pass.
+   *
+   * The stage lays out one node per planned entry, so the first `slides.length`
+   * nodes are the first enabled variant's renders. For a deck with a single
+   * default variant that is the base deck in deck order, which is the mapping the
+   * align, distribute, and preflight-bounds paths have always used.
+   */
+  const measuredSlideIds = useMemo(() => {
+    const first = enabledVariantsForProfile(variants, exportProfile.id)[0]
+    if (!first) return slides.map((slide) => slide.id)
+    return expandVariantRenders(slides, first).map((render) => render.slide.id)
+  }, [exportProfile.id, slides, variants])
 
   useLayoutEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      if (exportStageRef.current) setPreflightBounds(collectExportPreflightBounds(exportStageRef.current!, slides))
+      if (exportStageRef.current) {
+        setPreflightBounds(collectExportPreflightBounds(exportStageRef.current!, slides, measuredSlideIds))
+      }
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [activeLocale, exportProfile, slides])
-
+  }, [activeLocale, exportProfile, measuredSlideIds, slides])
   useEffect(() => {
     if (exportStatus !== 'validation') return
     if (preflight.status === 'blocked') {
@@ -183,6 +278,7 @@ function App() {
       || next.activeLocale !== current.activeLocale
       || next.canvasMode !== current.canvasMode
       || next.exportProfileId !== current.exportProfileId
+      || next.outputVariants !== current.outputVariants
 
     if (contentChanged) {
       const now = Date.now()
@@ -278,6 +374,7 @@ function App() {
             activeLocale: initialProject.activeLocale,
             canvasMode: initialProject.canvasMode,
             exportProfileId: initialProject.selectedExportProfileId,
+            ...(initialProject.outputVariants ? { outputVariants: initialProject.outputVariants } : {}),
           })
         }
         clearEditorHistory()
@@ -322,7 +419,16 @@ function App() {
     setPersistenceDetail('Changes autosave to this browser after a short delay.')
     const run = ++autosaveRunRef.current
     const timer = window.setTimeout(() => {
-      void saveProjectLocally({ name: projectName, slides, activeLocale, canvasMode, selectedExportProfileId: exportProfileId })
+      void saveProjectLocally({
+        name: projectName,
+        slides,
+        activeLocale,
+        canvasMode,
+        selectedExportProfileId: exportProfileId,
+        // Absent rather than an empty list, so a deck that never used a device
+        // variant keeps serializing the record it always wrote.
+        ...(outputVariants ? { outputVariants } : {}),
+      })
         .then(() => {
           if (run !== autosaveRunRef.current) return
           setPersistenceStatus('saved')
@@ -336,7 +442,7 @@ function App() {
     }, 600)
 
     return () => window.clearTimeout(timer)
-  }, [activeLocale, canvasMode, exportProfileId, projectLoadComplete, projectLoadFailed, projectName, slides])
+  }, [activeLocale, canvasMode, exportProfileId, projectLoadComplete, projectLoadFailed, projectName, slides, outputVariants])
 
   const updateSelectedSlide = (updates: Partial<Slide>, mergeKey?: string) => {
     commitEditorUpdate((current) => {
@@ -408,6 +514,42 @@ function App() {
         )),
       }
     }, mergeKey)
+  }
+
+  /**
+   * Applies one align, distribute, or stacking action to the active slide.
+   *
+   * The token makes each press its own history entry, so one align is one undo
+   * step, and a request that cannot apply is dropped rather than recorded as an
+   * empty step the author would have to undo twice.
+   */
+  const arrangeActiveSlide = (action: LayerArrangeAction) => {
+    const canvas = { width: exportProfile.width, height: exportProfile.height }
+    let description: string | null = null
+    arrangeTokenRef.current += 1
+    const token = arrangeTokenRef.current
+
+    commitEditorUpdate((current) => {
+      description = null
+      const slide = current.slides.find((item) => item.id === current.selectedId)
+      if (!slide) return current
+      const result = applyLayerArrange({
+        slide,
+        action,
+        selectedLayerId: selectedLayerIdRef.current,
+        bounds: preflightBoundsRef.current[slide.id],
+        canvas,
+      })
+      if (!result.changed) return current
+      description = result.description
+      return {
+        ...current,
+        slides: current.slides.map((item) => (item.id === slide.id ? result.slide : item)),
+      }
+    }, layerArrangeMergeKey(action, editorRef.current.selectedId, token))
+
+    if (!description) return
+    setProjectValidationNotice(`${description}. Undo is available.`)
   }
 
   /**
@@ -569,6 +711,9 @@ function App() {
         translations: source.translations
           ? Object.fromEntries(Object.entries(source.translations).map(([locale, copy]) => [locale, { ...copy }]))
           : undefined,
+        // Copied rather than shared, so reordering the duplicate can never
+        // reach back into the slide it came from.
+        ...(source.layerOrder ? { layerOrder: [...source.layerOrder] } : {}),
         layerTransforms: Object.fromEntries(
           Object.entries(source.layerTransforms).map(([layerId, transform]) => [layerId, { ...transform }]),
         ) as Slide['layerTransforms'],
@@ -618,9 +763,14 @@ function App() {
   }
 
   /**
-   * Copies the selected slide's visual style onto every other slide. Only
-   * fields the project format already carries are touched, and the change goes
-   * through the same history and autosave path as every other edit.
+   * Copies the selected slide's visual style onto every other slide. The rule
+   * that decides which fields count as style lives in `lib/slideStyle`, where a
+   * test can reach it; this handler only decides when to run it and what to say.
+   *
+   * The background fill and its focal point are part of that list. Leaving them
+   * out would leave "apply style to all" copying the theme while the rest of the
+   * deck kept its own backdrop, which is exactly the desynchronization this
+   * button exists to remove.
    */
   const applySelectedSlideStyleToAllSlides = () => {
     let appliedCount = 0
@@ -628,33 +778,9 @@ function App() {
       const source = current.slides.find((slide) => slide.id === current.selectedId)
       if (!source) return current
 
-      let changed = false
-      const nextSlides = current.slides.map((slide) => {
-        if (slide.id === source.id) return slide
-        if (
-          slide.layout === source.layout
-          && slide.theme === source.theme
-          && slide.deviceFrameId === source.deviceFrameId
-          && slide.showDeviceStatusBar === source.showDeviceStatusBar
-          && slide.screenshotFit === source.screenshotFit
-          && slide.accentShapeStyle.type === source.accentShapeStyle.type
-          && slide.accentShapeStyle.color.toLowerCase() === source.accentShapeStyle.color.toLowerCase()
-        ) return slide
-
-        changed = true
-        return {
-          ...slide,
-          layout: source.layout,
-          theme: source.theme,
-          deviceFrameId: source.deviceFrameId,
-          showDeviceStatusBar: source.showDeviceStatusBar,
-          screenshotFit: source.screenshotFit,
-          accentShapeStyle: { ...source.accentShapeStyle },
-        }
-      })
-
-      if (!changed) return current
-      appliedCount = nextSlides.length - 1
+      const { slides: nextSlides, changedCount } = applySlideStyleToDeck(current.slides, source)
+      if (changedCount === 0) return current
+      appliedCount = changedCount
       return { ...current, slides: nextSlides }
     })
 
@@ -779,6 +905,155 @@ function App() {
       })
   }
 
+  /**
+   * One slide's drop target, shared by the capture cards, the deck tiles, and the
+   * device placeholder.
+   *
+   * The plan is derived, not decided here: the drop module already knows which
+   * files are captures, which slide each one lands on, whether it replaces what
+   * is there, and which files are refused. This function reads the accepted
+   * files, writes the whole plan in one `commitEditorUpdate`, and returns the
+   * notice, so a drop of six images is one undo step and one autosave.
+   *
+   * A project document in the same drop is deliberately not opened. Opening one
+   * would replace the whole deck, which is not what dropping onto a single slide
+   * means, so it is reported instead of acted on.
+   */
+  const dropFilesOnSlide = async (targetSlideId: string, files: File[]): Promise<string> => {
+    if (exportInProgressRef.current) {
+      return 'An export is running, so nothing was placed. Drop again once it finishes.'
+    }
+
+    const initialPlan = planScreenshotDrop({ files, slides: editorRef.current.slides, targetSlideId })
+    if (initialPlan.captures.length === 0) {
+      setProjectValidationNotice(initialPlan.notice)
+      return initialPlan.notice
+    }
+
+    let items: ScreenshotImportItem[]
+    try {
+      items = await Promise.all(initialPlan.captures.map((capture) => readScreenshotFile(capture.file)))
+    } catch {
+      const notice = `${initialPlan.notice} One or more images could not be read, so nothing was placed.`
+      setPersistenceStatus('error')
+      setPersistenceDetail(notice)
+      return notice
+    }
+
+    /**
+     * Re-planned against the live deck rather than the one the drop landed on,
+     * because reading the files is asynchronous: a slide can be deleted or a
+     * second slide added in between, and the assignment has to match the deck
+     * that is actually being written.
+     */
+    let notice = initialPlan.notice
+    let appliedCount = 0
+    commitEditorUpdate((current) => {
+      const plan = planScreenshotDrop({ files, slides: current.slides, targetSlideId })
+      if (plan.captures.length === 0) {
+        // The target slide is gone, so the plan refuses every capture and says
+        // why. Nothing is written and no empty history entry is recorded.
+        notice = plan.notice
+        return current
+      }
+      if (plan.captures.length !== items.length) {
+        notice = 'The deck changed while the images were being read, so nothing was placed. Drop them again.'
+        return current
+      }
+      const nextSlides = [...current.slides]
+      let lastTouchedId: string | null = null
+      plan.captures.forEach((capture, index) => {
+        const item = items[index]
+        if (capture.slideId) {
+          const at = nextSlides.findIndex((slide) => slide.id === capture.slideId)
+          if (at < 0) return
+          nextSlides[at] = { ...nextSlides[at], screenshot: item.dataUrl, screenshotName: item.name }
+          lastTouchedId = capture.slideId
+          return
+        }
+        // Past the end of the deck: a new slide appended in the same order, so
+        // the drop reads as a continued sequence rather than a reshuffle.
+        const template = nextSlides.find((slide) => slide.id === targetSlideId) ?? nextSlides[0]
+        const created: Slide = {
+          ...createSlide(),
+          title: '',
+          subtitle: '',
+          ...(template
+            ? {
+              layout: template.layout,
+              theme: template.theme,
+              deviceFrameId: template.deviceFrameId,
+              showDeviceStatusBar: template.showDeviceStatusBar,
+              screenshotFit: template.screenshotFit,
+              accentShapeStyle: { ...template.accentShapeStyle },
+            }
+            : {}),
+          screenshot: item.dataUrl,
+          screenshotName: item.name,
+        }
+        nextSlides.push(created)
+        lastTouchedId = created.id
+      })
+
+      appliedCount = plan.assignedCount
+      notice = plan.notice
+      return {
+        ...current,
+        slides: nextSlides,
+        // The last slide the drop touched is the one the author is looking at
+        // next, which is also the one they will want to frame.
+        selectedId: lastTouchedId ?? current.selectedId,
+      }
+    })
+
+    if (appliedCount === 0) {
+      setProjectValidationNotice(notice)
+      return notice
+    }
+
+    setSelectedLayerId('screenshot')
+    setProjectValidationNotice(notice)
+    return notice
+  }
+
+  /**
+   * Copies an existing capture onto another slide, from a card dragged onto a
+   * card. It is a copy and not a move: the source slide keeps its capture,
+   * because dragging a card to reuse a capture is a far more common intention
+   * than rearranging the deck, and a move would silently blank a slide.
+   */
+  const dropCaptureOnSlide = (targetSlideId: string, capture: KamiCapturePayload): string => {
+    if (exportInProgressRef.current) {
+      return 'An export is running, so nothing was placed. Drop again once it finishes.'
+    }
+
+    const source = editorRef.current.slides.find((slide) => slide.id === capture.slideId)
+    if (!source?.screenshot) {
+      return 'That capture is no longer on its slide, so nothing was placed.'
+    }
+    if (source.id === targetSlideId) {
+      return `Slide ${editorRef.current.slides.indexOf(source) + 1} already has that capture. Nothing changed.`
+    }
+
+    const target = editorRef.current.slides.find((slide) => slide.id === targetSlideId)
+    if (!target) return 'That slide is no longer in the deck, so nothing was placed.'
+
+    const slideNumber = editorRef.current.slides.indexOf(target) + 1
+    const notice = `Copied ${source.screenshotName ?? 'the capture'} onto slide ${slideNumber}. The original is untouched. Undo is available.`
+    commitEditorUpdate((current) => ({
+      ...current,
+      slides: current.slides.map((slide) => (
+        slide.id === targetSlideId
+          ? { ...slide, screenshot: source.screenshot, screenshotName: source.screenshotName }
+          : slide
+      )),
+      selectedId: targetSlideId,
+    }))
+    setSelectedLayerId('screenshot')
+    setProjectValidationNotice(notice)
+    return notice
+  }
+
   const importAppIcon = (file: File, targetId = selectedSlide.id) => {
     if (!file.type.startsWith('image/')) return
     const reader = new FileReader()
@@ -810,26 +1085,39 @@ function App() {
   }
 
   const importBackgroundImage = (file: File, targetId = selectedSlide.id) => {
-    if (!/^image\/(?:png|jpeg|webp)$/i.test(file.type)) return
+    // A backdrop is artwork, not a capture: SVG is allowed here, and it is the
+    // format the demo project and the exported bundles already use.
+    if (!/^image\/(?:png|jpeg|jpg|webp|svg\+xml|avif|gif)$/i.test(file.type)
+      && !/\.(?:png|jpe?g|webp|svg|avif|gif)$/i.test(file.name)) return
     const reader = new FileReader()
     reader.onload = () => {
       if (typeof reader.result !== 'string') return
-      const mimeType = file.type || reader.result.match(/^data:([^;,]+)/i)?.[1] || 'application/octet-stream'
-      commitEditorUpdate((current) => {
-        let changed = false
-        const nextSlides = current.slides.map((slide) => {
-          if (slide.id !== targetId) return slide
-          changed = true
-          return {
-            ...slide,
-            backgroundImage: {
-              name: file.name,
-              dataUrl: reader.result as string,
-              mimeType,
-            },
-          }
+      const dataUrl = reader.result
+      const mimeType = file.type || dataUrl.match(/^data:([^;,]+)/i)?.[1] || 'application/octet-stream'
+      /*
+       * The intrinsic size is a hint for the panoramic overscan, so it is
+       * measured here rather than guessed. It is optional on purpose: an
+       * import that cannot be measured still stores the backdrop, and the canvas
+       * falls back to a plain cover until the image reports its own size.
+       */
+      void measureIntrinsicSize(dataUrl).then((size) => {
+        commitEditorUpdate((current) => {
+          let changed = false
+          const nextSlides = current.slides.map((slide) => {
+            if (slide.id !== targetId) return slide
+            changed = true
+            return {
+              ...slide,
+              backgroundImage: {
+                name: file.name,
+                dataUrl,
+                mimeType,
+                ...(size ? { width: size.width, height: size.height } : {}),
+              },
+            }
+          })
+          return changed ? { ...current, slides: nextSlides } : current
         })
-        return changed ? { ...current, slides: nextSlides } : current
       })
     }
     reader.onerror = () => {
@@ -868,7 +1156,14 @@ function App() {
 
   const saveProject = () => {
     try {
-      const project = serializeProject({ name: projectName, slides, activeLocale, canvasMode, selectedExportProfileId: exportProfileId })
+      const project = serializeProject({
+        name: projectName,
+        slides,
+        activeLocale,
+        canvasMode,
+        selectedExportProfileId: exportProfileId,
+        ...(outputVariants ? { outputVariants } : {}),
+      })
       const blob = new Blob([`${JSON.stringify(project, null, 2)}\n`], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -903,7 +1198,9 @@ function App() {
         canvasMode: result.project.canvasMode,
         exportProfileId: result.project.selectedExportProfileId,
         selectedId: result.project.slides[0].id,
+        ...(result.project.outputVariants ? { outputVariants: result.project.outputVariants } : {}),
       }))
+      setPreviewVariantId('')
       setProjectLoadFailed(false)
       setProjectLoadComplete(true)
       setOnboardingOpen(false)
@@ -918,7 +1215,7 @@ function App() {
     if (exportInProgressRef.current) return
 
     const currentBounds = exportStageRef.current
-      ? collectExportPreflightBounds(exportStageRef.current, slides)
+      ? collectExportPreflightBounds(exportStageRef.current, slides, measuredSlideIds)
       : preflightBounds
     setPreflightBounds(currentBounds)
     const currentPreflight = runExportPreflight({
@@ -926,36 +1223,52 @@ function App() {
       slides,
       activeLocale,
       layerBounds: currentBounds,
+      variants,
     })
     if (currentPreflight.status === 'blocked') {
       const firstIssue = currentPreflight.blockingIssues[0]
-      const slideLabel = firstIssue.slideNumbers.length > 0
-        ? ` (${firstIssue.slideNumbers.length === 1 ? 'slide' : 'slides'} ${firstIssue.slideNumbers.join(', ')})`
-        : ''
       setExportStatus('validation')
-      setExportDetail(`Export blocked: ${firstIssue.message}${slideLabel}`)
+      setExportDetail(`Export blocked: ${firstIssue.message}`)
+      return
+    }
+
+    /*
+     * The plan is recomputed here rather than read from the memo, so an export
+     * can never be written against a plan the last render produced. A variant
+     * with a missing capture stops the run before anything is rendered, so the
+     * bundle can never contain a placeholder that looks finished.
+     */
+    const plan = planExportEntries({
+      slides,
+      variants,
+      profileId: exportProfile.id,
+      requiresScreenshot: exportProfile.preflight?.requirements.screenshot !== false,
+    })
+    if (plan.blocked) {
+      setExportStatus('validation')
+      setExportDetail(variantExportRefusal(plan.blocked))
       return
     }
 
     exportInProgressRef.current = true
     setExportStatus('exporting')
     setExportCompleted(0)
-    setExportTotal(slides.length)
-    setExportDetail(`Preparing ${exportProfile.name} PNGs…`)
+    setExportTotal(plan.entries.length)
+    setExportDetail(`Preparing ${plan.entries.length} ${exportProfile.name} PNG${plan.entries.length === 1 ? '' : 's'}…`)
 
     try {
       if (!exportStageRef.current) throw new Error('The export canvas is not ready.')
-      const { archive, filename } = await exportSlidesAsZip(
+      const { archive, filename } = await exportSlidesAsZip({
         projectName,
-        slides,
-        exportStageRef.current,
-        exportProfile,
-        ({ completed, total, detail }) => {
+        entries: plan.entries,
+        profile: exportProfile,
+        stage: exportStageRef.current,
+        onProgress: ({ completed, total, detail }) => {
           setExportCompleted(completed)
           setExportTotal(total)
           setExportDetail(detail)
         },
-      )
+      })
       const url = URL.createObjectURL(archive)
       const link = document.createElement('a')
       link.href = url
@@ -965,15 +1278,150 @@ function App() {
       link.remove()
       window.setTimeout(() => URL.revokeObjectURL(url), 0)
       setExportStatus('success')
-      setExportCompleted(slides.length)
-      setExportTotal(slides.length)
-      setExportDetail(`${filename} downloaded with ${slides.length} PNG${slides.length === 1 ? '' : 's'}.`)
+      setExportCompleted(plan.entries.length)
+      setExportTotal(plan.entries.length)
+      setExportDetail(`${filename} downloaded with ${plan.entries.length} PNG${plan.entries.length === 1 ? '' : 's'}.`)
     } catch (error) {
       setExportStatus('error')
       setExportDetail(error instanceof Error ? error.message : 'The PNG ZIP could not be created. Try again.')
     } finally {
       exportInProgressRef.current = false
     }
+  }
+
+  /**
+   * The variant actions the Ship stage offers.
+   *
+   * All of them are one `commitEditorUpdate` each, so one is one undo step and
+   * one autosave, exactly like every other edit in the editor.
+   */
+  const updateOutputVariants = (next: OutputVariant[] | undefined) => {
+    commitEditorUpdate((current) => {
+      if (next === current.outputVariants) return current
+      return { ...current, ...(next && next.length > 0 ? { outputVariants: next } : { outputVariants: undefined }) }
+    })
+  }
+
+  const changeVariantProfile = (variantId: string, profileId: ExportProfileId) => {
+    updateOutputVariants(variants.map((variant) => (variant.id === variantId ? { ...variant, exportProfileId: profileId } : variant)))
+  }
+
+  const toggleVariantEnabled = (variantId: string) => {
+    updateOutputVariants(variants.map((variant) => (variant.id === variantId ? { ...variant, enabled: !variant.enabled } : variant)))
+  }
+
+  const renameVariant = (variantId: string, name: string) => {
+    const trimmed = name.trim()
+    if (trimmed.length === 0) return
+    updateOutputVariants(variants.map((variant) => (variant.id === variantId ? { ...variant, name: trimmed } : variant)))
+  }
+
+  /**
+   * Adds a device variant: the same slides, the same locale, no overrides, and
+   * the current profile. It is a starting point to edit, not a duplicate of the
+   * deck, so the author names it and then changes only the device on the slides
+   * that need it.
+   */
+  const addOutputVariant = () => {
+    const taken = new Set(variants.map((variant) => variant.id))
+    let index = variants.length + 1
+    let id = `variant-${index}`
+    while (taken.has(id)) {
+      index += 1
+      id = `variant-${index}`
+    }
+    const added: OutputVariant = {
+      id,
+      name: `Device ${index}`,
+      canvasId: variants[0]?.canvasId ?? 'main-story',
+      locale: activeLocale,
+      themeId: slides[0]?.theme ?? 'midnight',
+      slideIds: slides.map((slide) => slide.id),
+      enabled: true,
+      exportProfileId: exportProfileId,
+    }
+    updateOutputVariants([...variants, added])
+    setPreviewVariantId(added.id)
+    setProjectValidationNotice(`Added the “${added.name}” variant. Rename it, then set the device on the slides that differ. Undo is available.`)
+  }
+
+  /** Removes a variant and everything it overrides. */
+  const removeOutputVariant = (variantId: string) => {
+    const target = variants.find((variant) => variant.id === variantId)
+    if (!target) return
+    const remaining = variants.filter((variant) => variant.id !== variantId)
+    updateOutputVariants(remaining.length > 0 ? remaining : undefined)
+    if (previewVariantId === variantId) setPreviewVariantId('')
+    setProjectValidationNotice(`Removed the “${target.name}” variant and its overrides. Undo is available.`)
+  }
+
+  /**
+   * One device field for one slide of one variant.
+   *
+   * `undefined` clears it and the slide's own field takes over again, which is
+   * the whole rule a variant is built on: a slide with no override for a field
+   * uses the deck's value. An override that ends up naming nothing is removed
+   * rather than stored, so clearing the last field really returns the document to
+   * the shape it had.
+   */
+  const updateVariantOverride = (
+    variantId: string,
+    slideId: string,
+    field: 'deviceFrameId' | 'showDeviceStatusBar' | 'screenshotFit',
+    value: DeviceVariantSlideOverride['deviceFrameId'] | boolean | ScreenshotFit | undefined,
+  ) => {
+    const variant = variants.find((entry) => entry.id === variantId)
+    if (!variant) return
+    const existing = variant.deviceOverrides?.find((override) => override.slideId === slideId)
+    const next: DeviceVariantSlideOverride = { ...(existing ?? { slideId }), [field]: value } as DeviceVariantSlideOverride
+    for (const key of ['deviceFrameId', 'showDeviceStatusBar', 'screenshotFit', 'screenshot', 'layerTransforms'] as const) {
+      if (next[key] === undefined) delete next[key]
+    }
+    const others = (variant.deviceOverrides ?? []).filter((override) => override.slideId !== slideId)
+    const kept = Object.keys(next).length > 1
+    updateOutputVariants(variants.map((entry) => (entry.id === variantId
+      ? { ...entry, ...(kept ? { deviceOverrides: [...others, next] } : { deviceOverrides: others.length > 0 ? others : undefined }) }
+      : entry)))
+  }
+
+  /**
+   * Gives one slide of one variant its own capture.
+   *
+   * There is deliberately no "remove the capture" action: a variant that has to
+   * withhold a capture blocks its own export rather than shipping a hole, and
+   * removing the deck's capture is the deck's business, not the variant's.
+   */
+  const updateVariantCapture = (variantId: string, slideId: string, capture: CaptureAsset) => {
+    const variant = variants.find((entry) => entry.id === variantId)
+    if (!variant) return
+    const others = (variant.deviceOverrides ?? []).filter((override) => override.slideId !== slideId)
+    updateOutputVariants(variants.map((entry) => (entry.id === variantId
+      ? { ...entry, deviceOverrides: [...others, { slideId, screenshot: capture }] }
+      : entry)))
+    setSelectedLayerId('screenshot')
+  }
+
+  /** Opens the picker for one slide of one variant. */
+  const openVariantCaptureImport = (variantId: string, slideId: string) => {
+    variantCaptureTargetRef.current = { variantId, slideId }
+    variantCaptureInputRef.current?.click()
+  }
+
+  /** Reads one image and stores it as that slide's capture inside the variant. */
+  const importVariantCapture = (target: { variantId: string; slideId: string }, file: File) => {
+    if (!file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') return
+      const mimeType = file.type || reader.result.match(/^data:([^;,]+)/i)?.[1] || 'application/octet-stream'
+      updateVariantCapture(target.variantId, target.slideId, { name: file.name, dataUrl: reader.result, mimeType })
+      setProjectValidationNotice(`Capture set for this device only. The deck’s own capture is untouched. Undo is available.`)
+    }
+    reader.onerror = () => {
+      setPersistenceStatus('error')
+      setPersistenceDetail('That image could not be read. The variant was not changed.')
+    }
+    reader.readAsDataURL(file)
   }
 
   /**
@@ -1011,8 +1459,12 @@ function App() {
     selectedLayerId,
     onLayerSelect: setSelectedLayerId,
     onLayerTransformChange: updateLayerPosition,
+    layerBounds: preflightBounds,
+    onArrange: arrangeActiveSlide,
     onImportScreenshot: openImport,
     onImportFiles: importScreenshotFiles,
+    onDropFilesOnSlide: dropFilesOnSlide,
+    onDropCaptureOnSlide: dropCaptureOnSlide,
     onOpenScreenshotImport: () => setScreenshotImportOpen(true),
     onImportAppIcon: () => openAppIconImport(),
     onRemoveAppIcon: removeAppIcon,
@@ -1031,6 +1483,18 @@ function App() {
     profile: exportProfile,
     onProfileChange: changeExportProfile,
     preflight,
+    variants,
+    activeVariantId: previewVariant?.id ?? '',
+    exportEntries: exportPlan.entries,
+    exportBlockedVariant: exportPlan.blocked,
+    onVariantPreviewChange: setPreviewVariantId,
+    onVariantProfileChange: changeVariantProfile,
+    onVariantToggleEnabled: toggleVariantEnabled,
+    onVariantRename: renameVariant,
+    onVariantAdd: addOutputVariant,
+    onVariantRemove: removeOutputVariant,
+    onVariantOverrideChange: updateVariantOverride,
+    onVariantCaptureChange: openVariantCaptureImport,
     onExport: () => void exportProject(),
     exportStatus,
     exportDetail,
@@ -1098,6 +1562,8 @@ function App() {
               selectedLayerId={selectedLayerId}
               onLayerSelect={setSelectedLayerId}
               onLayerTransformChange={updateLayerPosition}
+              onDropFilesOnSlide={dropFilesOnSlide}
+              onDropCaptureOnSlide={dropCaptureOnSlide}
               persistenceStatus={persistenceStatus}
               persistenceDetail={persistenceDetail}
               projectValidationNotice={projectValidationNotice}
@@ -1123,6 +1589,8 @@ function App() {
               onLayerSelect={setSelectedLayerId}
               profile={exportProfile}
               preflight={preflight}
+              layerBounds={preflightBounds}
+              onArrange={arrangeActiveSlide}
               onProfileChange={changeExportProfile}
               exportDisabled={exportStatus === 'exporting'}
             />
@@ -1171,6 +1639,21 @@ function App() {
         aria-label="Import background image"
       />
       <input
+        ref={variantCaptureInputRef}
+        className="visually-hidden"
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
+        onChange={(event) => {
+          const input = event.currentTarget
+          const file = input.files?.[0]
+          const target = variantCaptureTargetRef.current
+          if (file && target) importVariantCapture(target, file)
+          variantCaptureTargetRef.current = null
+          input.value = ''
+        }}
+        aria-label="Import a capture for one device variant"
+      />
+      <input
         ref={projectInputRef}
         className="visually-hidden"
         type="file"
@@ -1183,7 +1666,7 @@ function App() {
         }}
         aria-label="Open screenshot studio project"
       />
-      <ExportSlides slides={slides} profile={exportProfile} locale={activeLocale} stageRef={exportStageRef} />
+      <ExportSlides entries={exportPlan.entries} variants={variants} profile={exportProfile} locale={activeLocale} stageRef={exportStageRef} />
       {onboardingOpen && (
         <OnboardingGuide
           onClose={closeOnboarding}

@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { MouseEvent } from 'react'
 import {
+  backgroundFillOptions,
   deviceFramePresets,
   layouts,
   screenshotFitOptions,
@@ -9,6 +10,7 @@ import {
   themes,
 } from '../../data'
 import {
+  describeBulkSlideCaveat,
   describeFramelessTargets,
   MIXED_BULK_VALUE,
   resolveTargetSlides,
@@ -23,7 +25,9 @@ import {
   isMultiSelectGesture,
   type FlowboardSelection,
 } from '../../lib/flowboardSelection'
-import type { DeviceFrameId, LayerId, LayoutId, ScreenshotFit, Slide, ThemeId } from '../../types'
+import type { BackgroundFillKind, DeviceFrameId, FocalPoint, LayerId, LayoutId, ScreenshotFit, Slide, ThemeId } from '../../types'
+import { FocalPointFields } from '../BackgroundFillControls'
+import { clampFocalPoint, resolveBackgroundFill } from '../../lib/backgroundFill'
 
 export interface SlideSelectionHandlers {
   onClick: (event: MouseEvent<HTMLElement>) => void
@@ -166,10 +170,35 @@ export function BulkActionBar({
   const sharedStatusBar = sharedValue(targets, (slide) => slide.showDeviceStatusBar)
   const sharedLayout = sharedValue(targets, (slide) => slide.layout)
   const sharedTheme = sharedValue(targets, (slide) => slide.theme)
+  const sharedFill = sharedValue(targets, (slide) => resolveBackgroundFill(slide.backgroundFill).kind)
+  /**
+   * The focal point is two axes, so a mixed selection cannot honestly be shown
+   * as a pair of sliders: whichever axis the author nudged would also commit the
+   * other axis from whichever slide happened to come first. The bar therefore
+   * offers only the one operation that is unambiguous on a mixed selection —
+   * recentring — and the sliders once the selection already agrees.
+   */
+  const sharedFocal = sharedValue(targets, (slide) => {
+    const point = clampFocalPoint(slide.backgroundFocalPoint)
+    return `${point.x},${point.y}`
+  })
+  const focalValue = useMemo<FocalPoint | null>(() => {
+    if (sharedFocal === null) return null
+    const [x, y] = sharedFocal.split(',').map(Number)
+    return { x, y }
+  }, [sharedFocal])
   const sharedVisible = sharedValue(layerSettings, (settings) => settings.visible)
   const sharedOpacity = sharedValue(layerSettings, (settings) => settings.opacity)
   const opacityValue = sharedOpacity ?? layerSettings[0]?.opacity ?? 1
   const opacityPercent = Math.round(opacityValue * 100)
+  /**
+   * Only worth saying when the selection already agrees on an image fill and
+   * part of it has no image to fill with. A mixed selection has no single fill
+   * to caveat yet.
+   */
+  const fillCaveat = sharedFill === null
+    ? null
+    : describeBulkSlideCaveat({ kind: 'background-fill', backgroundFill: sharedFill }, targets)
   const framelessNote = describeFramelessTargets(targets)
   const missingLayerNote = layerSettings.length < count
 
@@ -289,6 +318,54 @@ export function BulkActionBar({
             </select>
 
             <p className="flowboard-hint">Copy and captures are never touched by a bulk style change.</p>
+
+            <span className="field-label" id={`${idPrefix}-bulk-background-label`}>Background fill</span>
+            <div className="flowboard-bulk__segmented" role="group" aria-labelledby={`${idPrefix}-bulk-background-label`}>
+              {backgroundFillOptions.map((option) => {
+                const active = sharedFill === option.id
+                return (
+                  <button
+                    key={option.id}
+                    className={`flowboard-bulk__option${active ? ' is-active' : ''}`}
+                    type="button"
+                    aria-pressed={active}
+                    aria-label={`Set the ${option.label.toLowerCase()} background fill for ${scope}`}
+                    title={`${option.description} for ${scope}`}
+                    disabled={active}
+                    onClick={() => onApply({ kind: 'background-fill', backgroundFill: option.id as BackgroundFillKind })}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+            {fillCaveat && <p className="flowboard-hint">{fillCaveat}</p>}
+
+            {focalValue
+              ? (
+                <FocalPointFields
+                  value={focalValue}
+                  idPrefix={`${idPrefix}-bulk-focal`}
+                  label={`Background image for ${scope}`}
+                  onChange={(point: FocalPoint) => onApply({ kind: 'focal-point', focalPoint: point })}
+                />
+              )
+              : (
+                <>
+                  <span className="field-label">Focal point</span>
+                  <button
+                    className="button button--outline button--small"
+                    type="button"
+                    onClick={() => onApply({ kind: 'focal-point', focalPoint: { x: 0.5, y: 0.5 } })}
+                  >
+                    Recentre for {scope}
+                  </button>
+                  <p className="flowboard-hint">
+                    The {label} disagree on the focal point, so only recentring is offered. Nudge one slide to align the
+                    rest first.
+                  </p>
+                </>
+              )}
           </div>
         )}
 

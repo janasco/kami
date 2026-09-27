@@ -74,6 +74,8 @@ const inspectorProps = (props: FlowboardProps) => ({
   onLayerSelect: props.onLayerSelect,
   profile: props.profile,
   preflight: props.preflight,
+  layerBounds: props.layerBounds,
+  onArrange: props.onArrange,
   onProfileChange: props.onProfileChange,
   exportDisabled: false,
 })
@@ -97,6 +99,8 @@ const frameProps = (props: FlowboardProps, multiSelectedIds: string[]) => ({
   bulkNotice: null,
   onImport: props.onImportScreenshot,
   profile: props.profile,
+  onDropFiles: props.onDropFilesOnSlide,
+  onDropCapture: props.onDropCaptureOnSlide,
 })
 
 /** Story stage props for a given multi-selection. */
@@ -305,6 +309,34 @@ describe('Flowboard', () => {
     expect(markup).toContain('right-click')
   })
 
+  it('offers a background fill in the story bulk bar, and a focal point only when the selection agrees', () => {
+    const props = makeProps()
+    // The demo deck is entirely on the theme fill, so the selection agrees and
+    // the two focal sliders are the honest control.
+    const aligned = renderToStaticMarkup(createElement(StoryStage, storyProps(props, props.slides.slice(0, 2).map((slide) => slide.id))))
+    expect(aligned).toContain('flowboard-story-bulk-background-label')
+    for (const option of ['Theme', 'Solid', 'Gradient', 'Image', 'Panoramic']) {
+      expect(aligned).toContain(`>${option}</button>`)
+    }
+    expect(aligned).toContain('flowboard-story-bulk-focal-focal-x')
+    expect(aligned).toContain('flowboard-story-bulk-focal-focal-y')
+    expect(aligned).not.toContain('Recentre for the')
+
+    // One slide nudged off centre makes the selection mixed, and a two-axis
+    // slider cannot represent that. Only the one unambiguous action is offered.
+    const moved = props.slides.map((slide, index) => (index === 1
+      ? { ...slide, backgroundFocalPoint: { x: 0.2, y: 0.3 } }
+      : slide))
+    const mixed = renderToStaticMarkup(createElement(StoryStage, storyProps({
+      ...props,
+      slides: moved,
+      selectedSlide: moved[0],
+    }, moved.slice(0, 2).map((slide) => slide.id))))
+    expect(mixed).not.toContain('bulk-focal-focal-x')
+    expect(mixed).toContain('Recentre for the 2 selected slides')
+    expect(mixed).toContain('disagree on the focal point')
+  })
+
   it('renders the translation matrix beside the story beat strip', () => {
     const props = makeProps()
     const markup = renderToStaticMarkup(createElement(StoryStage, storyProps(props, [])))
@@ -392,6 +424,18 @@ describe('Flowboard', () => {
       profile: props.profile,
       onProfileChange: props.onProfileChange,
       preflight: props.preflight,
+      variants: props.variants,
+      activeVariantId: props.activeVariantId,
+      onVariantPreviewChange: props.onVariantPreviewChange,
+      onVariantProfileChange: props.onVariantProfileChange,
+      onVariantToggleEnabled: props.onVariantToggleEnabled,
+      onVariantRename: props.onVariantRename,
+      onVariantAdd: props.onVariantAdd,
+      onVariantRemove: props.onVariantRemove,
+      onVariantOverrideChange: props.onVariantOverrideChange,
+      onVariantCaptureChange: props.onVariantCaptureChange,
+      exportEntries: props.exportEntries,
+      exportBlockedVariant: props.exportBlockedVariant,
       exportGate: resolveFlowboardExportGate({
         exportStatus: 'idle',
         preflight: props.preflight,
@@ -431,6 +475,18 @@ describe('Flowboard', () => {
       profile: props.profile,
       onProfileChange: props.onProfileChange,
       preflight: props.preflight,
+      variants: props.variants,
+      activeVariantId: props.activeVariantId,
+      onVariantPreviewChange: props.onVariantPreviewChange,
+      onVariantProfileChange: props.onVariantProfileChange,
+      onVariantToggleEnabled: props.onVariantToggleEnabled,
+      onVariantRename: props.onVariantRename,
+      onVariantAdd: props.onVariantAdd,
+      onVariantRemove: props.onVariantRemove,
+      onVariantOverrideChange: props.onVariantOverrideChange,
+      onVariantCaptureChange: props.onVariantCaptureChange,
+      exportEntries: props.exportEntries,
+      exportBlockedVariant: props.exportBlockedVariant,
       exportGate: gate,
       exportDetail: '',
       onExport: props.onExport,
@@ -480,6 +536,18 @@ describe('Flowboard', () => {
       profile: props.profile,
       onProfileChange: noop,
       preflight: props.preflight,
+      variants: props.variants,
+      activeVariantId: props.activeVariantId,
+      onVariantPreviewChange: props.onVariantPreviewChange,
+      onVariantProfileChange: props.onVariantProfileChange,
+      onVariantToggleEnabled: props.onVariantToggleEnabled,
+      onVariantRename: props.onVariantRename,
+      onVariantAdd: props.onVariantAdd,
+      onVariantRemove: props.onVariantRemove,
+      onVariantOverrideChange: props.onVariantOverrideChange,
+      onVariantCaptureChange: props.onVariantCaptureChange,
+      exportEntries: props.exportEntries,
+      exportBlockedVariant: props.exportBlockedVariant,
       exportGate: gate,
       exportDetail: '',
       onExport: noop,
@@ -559,6 +627,18 @@ describe('Flowboard shell layout', () => {
       profile: props.profile,
       onProfileChange: noop,
       preflight: props.preflight,
+      variants: props.variants,
+      activeVariantId: props.activeVariantId,
+      onVariantPreviewChange: props.onVariantPreviewChange,
+      onVariantProfileChange: props.onVariantProfileChange,
+      onVariantToggleEnabled: props.onVariantToggleEnabled,
+      onVariantRename: props.onVariantRename,
+      onVariantAdd: props.onVariantAdd,
+      onVariantRemove: props.onVariantRemove,
+      onVariantOverrideChange: props.onVariantOverrideChange,
+      onVariantCaptureChange: props.onVariantCaptureChange,
+      exportEntries: props.exportEntries,
+      exportBlockedVariant: props.exportBlockedVariant,
       exportGate: resolveFlowboardExportGate({
         exportStatus: 'idle',
         preflight: props.preflight,

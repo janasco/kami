@@ -1,4 +1,4 @@
-import type { AccentShapeStyle, ExportProfile, LayerId, LayerSettingsById, LayoutId, LocaleId, LocaleOption, ScreenshotFit, Slide, SlideTransform, ThemeId } from './types'
+import type { AccentShapeStyle, BackgroundBlend, BackgroundFillKind, BackgroundGradient, ExportProfile, LayerId, LayerSettingsById, LayoutId, LocaleId, LocaleOption, ScreenshotFit, Slide, SlideTransform, ThemeId } from './types'
 import { DEFAULT_DEVICE_FRAME_ID, defaultShowDeviceStatusBar } from './lib/devicePresets'
 
 // The device catalog is parametric data with its own derivation helpers, so it
@@ -64,6 +64,41 @@ export const screenshotFitOptions: Array<{
 }> = [
   { id: 'contain', label: 'Contain', description: 'Whole capture inside the frame' },
   { id: 'cover', label: 'Cover', description: 'Fill the frame and crop the edges' },
+]
+
+/**
+ * Default background fill. The theme is the safe default because it is what a
+ * slide renders when the field is absent, and absent is what every project
+ * authored before this field has.
+ */
+export const DEFAULT_BACKGROUND_FILL: BackgroundFillKind = 'theme'
+
+export const DEFAULT_BACKGROUND_COLOR = '#151525'
+
+/** Same 145° sweep the theme gradients use, so a gradient fill reads as Kami. */
+export const DEFAULT_BACKGROUND_GRADIENT: BackgroundGradient = { angle: 145, stops: ['#151525', '#5b4cf0'] }
+
+export const backgroundFillOptions: Array<{
+  id: BackgroundFillKind
+  label: string
+  description: string
+}> = [
+  { id: 'theme', label: 'Theme', description: 'The slide theme paint' },
+  { id: 'solid', label: 'Solid', description: 'One flat colour' },
+  { id: 'gradient', label: 'Gradient', description: 'Two colours across an angle' },
+  { id: 'image', label: 'Image', description: 'The background image, cropped to fill' },
+  { id: 'panoramic', label: 'Panoramic', description: 'The background image, bled past the frame' },
+]
+
+export const backgroundBlendOptions: Array<{
+  id: BackgroundBlend
+  label: string
+  description: string
+}> = [
+  { id: 'normal', label: 'Normal', description: 'Draw the image as it is' },
+  { id: 'multiply', label: 'Multiply', description: 'Darken the image into the theme' },
+  { id: 'screen', label: 'Screen', description: 'Lighten the image into the theme' },
+  { id: 'overlay', label: 'Overlay', description: 'Keep contrast, let the theme through' },
 ]
 
 export const localeOptions: LocaleOption[] = [

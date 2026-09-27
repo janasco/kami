@@ -1,6 +1,9 @@
 import {
+  backgroundBlendOptions,
+  backgroundFillOptions,
   deviceFramePresets,
   layouts,
+  slideLayerLabels,
   themes,
   exportProfiles,
   localeOptions,
@@ -9,7 +12,15 @@ import {
   TRANSFORM_SIZE_MAX,
   TRANSFORM_SIZE_MIN,
 } from '../data'
+/*
+ * The one asset path boundary, shared with the restore path in `project.ts`.
+ * It used to have a second, looser copy that accepted a `..` segment, so a
+ * hand-edited document could be reported as unsafe here and then opened anyway.
+ */
+import { isSafeAssetPath } from './assetPath'
+import { isBackgroundFillKind } from './backgroundFill'
 import { isKnownDeviceFrameId } from './devicePresets'
+import type { LayerId } from '../types'
 import { isScreenshotFit } from './screenshotFit'
 
 export type ValidationSeverity = 'error' | 'warning'
@@ -41,6 +52,8 @@ const supportedLocales = new Set<string>(localeOptions.map((locale) => locale.id
 const supportedProfiles = new Set<string>([...exportProfiles, ...pendingExportProfiles].map((profile) => profile.id))
 const supportedScreenshotFits = new Set<string>(screenshotFitOptions.map((option) => option.id))
 const screenshotFitIds = [...supportedScreenshotFits]
+const backgroundFillIds: string[] = backgroundFillOptions.map((option) => option.id)
+const backgroundBlendIds: string[] = backgroundBlendOptions.map((option) => option.id)
 const legacyLayouts = new Set(['portrait-store'])
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -54,6 +67,10 @@ const issue = (path: string, code: string, message: string): ValidationIssue =>
 
 const addIssue = (issues: ValidationIssue[], path: string, code: string, message: string) => {
   issues.push(issue(path, code, message))
+}
+
+const addWarning = (issues: ValidationIssue[], path: string, code: string, message: string) => {
+  issues.push({ ...issue(path, code, message), severity: 'warning' })
 }
 
 const requireRecord = (value: unknown, path: string, issues: ValidationIssue[]): value is Record<string, unknown> => {
@@ -70,13 +87,6 @@ const requireString = (value: unknown, path: string, issues: ValidationIssue[], 
 
 const requireId = (value: unknown, path: string, issues: ValidationIssue[]) =>
   requireString(value, path, issues, 'invalid-id')
-
-const isSafeAssetPath = (path: string) => {
-  if (/^data:image\/(?:png|jpeg|webp|svg\+xml);base64,/i.test(path)) return true
-  if (/^(?:https?:\/\/|blob:)/i.test(path)) return true
-  if (/^[a-z][a-z\d+.-]*:/i.test(path) || /[\u0000-\u001f]/.test(path)) return false
-  return !path.split(/[\\/]/).includes('..')
-}
 
 const validateFrame = (value: unknown, path: string, issues: ValidationIssue[], requireOrigin = true) => {
   if (!requireRecord(value, path, issues)) return
@@ -112,6 +122,67 @@ const validateTransform = (value: unknown, path: string, issues: ValidationIssue
   }
 }
 
+/**
+ * Validates the optional background fill.
+ *
+ * The asymmetry is deliberate and matches `screenshotFit`: the record and its
+ * `kind` are optional, so a document that never had a fill is untouched, and a
+ * record that lost its kind is completed by the migration. A `kind` that is
+ * present but unrecognised is an error, because the editor cannot know which
+ * fill was meant, while a malformed colour, angle, or stop is a warning,
+ * because the slide still opens with a repaired value rather than being lost.
+ */
+const validateBackgroundFill = (value: unknown, path: string, issues: ValidationIssue[]) => {
+  if (value === undefined) return
+  if (!requireRecord(value, path, issues)) return
+  if (value.kind !== undefined && !isBackgroundFillKind(value.kind)) {
+    addIssue(issues, `${path}.kind`, 'invalid-background-fill', `The background fill kind must be one of: ${backgroundFillIds.join(', ')}.`)
+    // The remaining fields only mean something next to a known kind.
+    return
+  }
+  if (value.blend !== undefined && !backgroundBlendIds.includes(String(value.blend))) {
+    addIssue(issues, `${path}.blend`, 'invalid-background-fill', `The background blend must be one of: ${backgroundBlendIds.join(', ')}.`)
+  }
+  if (value.color !== undefined && !/^#[0-9a-f]{6}$/i.test(String(value.color))) {
+    addWarning(issues, `${path}.color`, 'invalid-background-fill', 'The background fill colour is not a #rrggbb value; the default colour is used.')
+  }
+  if (value.gradient === undefined) return
+  const gradientPath = `${path}.gradient`
+  if (!requireRecord(value.gradient, gradientPath, issues)) return
+  if (value.gradient.angle !== undefined && !isFiniteNumber(value.gradient.angle)) {
+    addWarning(issues, `${gradientPath}.angle`, 'invalid-background-fill', 'The background fill angle must be a finite number; the default angle is used.')
+  }
+  if (value.gradient.stops === undefined) return
+  if (!Array.isArray(value.gradient.stops)) {
+    addWarning(issues, `${gradientPath}.stops`, 'invalid-background-fill', 'The background fill stops must be an array of colours; the default stops are used.')
+    return
+  }
+  value.gradient.stops.forEach((stop, index) => {
+    if (!/^#[0-9a-f]{6}$/i.test(String(stop))) {
+      addWarning(issues, `${gradientPath}.stops[${index}]`, 'invalid-background-fill', 'A background fill stop is not a #rrggbb value; the default colour is used in its place.')
+    }
+  })
+}
+
+/**
+ * Validates the optional focal point of an image layer.
+ *
+ * Out of range or non-finite is a warning, not an error: the value is clamped
+ * into `0..1` on read, so a hand-edited project still frames the way it meant
+ * to instead of refusing to open.
+ */
+const validateFocalPoint = (value: unknown, path: string, issues: ValidationIssue[]) => {
+  if (value === undefined) return
+  if (!requireRecord(value, path, issues)) return
+  for (const axis of ['x', 'y'] as const) {
+    const coordinate = value[axis]
+    if (coordinate === undefined) continue
+    if (!isFiniteNumber(coordinate) || coordinate < 0 || coordinate > 1) {
+      addWarning(issues, `${path}.${axis}`, 'invalid-focal-point', 'A focal point must be a number between 0 and 1; it is clamped on open.')
+    }
+  }
+}
+
 const validateIdCollection = (
   value: unknown,
   path: string,
@@ -133,6 +204,89 @@ const validateIdCollection = (
     }
   })
   return ids
+}
+
+/**
+ * Validates the optional per-device overrides of one output variant.
+ *
+ * The asymmetry follows the rest of the document and is deliberate:
+ *
+ * - An **enum** is an error with the exact path. A device frame, a fit, or a
+ *   boolean flag that is present but wrong is a value the editor cannot render
+ *   and cannot guess at, so the document is refused rather than opened with a
+ *   device the author did not ask for.
+ * - A **continuous** value is a warning and is clamped. A layer transform is a
+ *   position and a scale, and a hand-edited `widthScale: 900` is repairable: the
+ *   reader clamps it into range and the deck opens as close to the intent as the
+ *   numbers allow.
+ *
+ * The whole array is optional, so a variant with no overrides is untouched, and
+ * so is every project authored before this field.
+ */
+const validateDeviceOverrides = (value: unknown, path: string, assetIds: Set<string>, issues: ValidationIssue[]) => {
+  if (value === undefined) return
+  if (!Array.isArray(value)) {
+    addIssue(issues, path, 'invalid-variant', 'Output variant deviceOverrides must be an array.')
+    return
+  }
+  value.forEach((override, index) => {
+    const overridePath = `${path}[${index}]`
+    if (!requireRecord(override, overridePath, issues)) return
+    requireId(override.slideId, `${overridePath}.slideId`, issues)
+    if (override.deviceFrameId !== undefined) {
+      // A current preset is fine, an older spelling is migratable and reported,
+      // and any other name is an error: the renderer would have to guess a device.
+      if (!supportedDevices.has(String(override.deviceFrameId))) {
+        if (isKnownDeviceFrameId(override.deviceFrameId)) {
+          issues.push({ ...issue(`${overridePath}.deviceFrameId`, 'legacy-device-frame', 'Device frame uses an older name and will be updated on open.'), severity: 'warning' })
+        } else addIssue(issues, `${overridePath}.deviceFrameId`, 'unsupported-device-frame', 'Device frame is not supported by this editor.')
+      }
+    }
+    if (override.showDeviceStatusBar !== undefined && typeof override.showDeviceStatusBar !== 'boolean') {
+      addIssue(issues, `${overridePath}.showDeviceStatusBar`, 'invalid-device-setting', 'The device status bar flag must be a boolean.')
+    }
+    if (override.screenshotFit !== undefined && !isScreenshotFit(override.screenshotFit)) {
+      addIssue(issues, `${overridePath}.screenshotFit`, 'invalid-device-setting', `The screenshot fit must be one of: ${screenshotFitIds.join(', ')}.`)
+    }
+    if (override.assetId !== undefined) {
+      requireString(override.assetId, `${overridePath}.assetId`, issues)
+      if (isString(override.assetId) && !assetIds.has(override.assetId)) {
+        addIssue(issues, `${overridePath}.assetId`, 'missing-reference', 'Device variant override references an asset that does not exist.')
+      }
+    }
+    if (override.layerTransforms !== undefined) {
+      if (!requireRecord(override.layerTransforms, `${overridePath}.layerTransforms`, issues)) return
+      for (const [layerId, transform] of Object.entries(override.layerTransforms)) {
+        const transformPath = `${overridePath}.layerTransforms.${layerId}`
+        if (!slideLayerLabels[layerId as LayerId]) {
+          addIssue(issues, transformPath, 'invalid-variant', 'Device variant layer transform names a layer this editor does not have.')
+          continue
+        }
+        if (!requireRecord(transform, transformPath, issues)) continue
+        for (const field of ['x', 'y', 'scale', 'rotation', 'widthScale', 'heightScale'] as const) {
+          if (transform[field] !== undefined && !isFiniteNumber(transform[field])) {
+            addIssue(issues, `${transformPath}.${field}`, 'invalid-variant', 'Device variant transform values must be finite numbers.')
+          }
+        }
+        for (const field of ['flipX', 'flipY'] as const) {
+          if (transform[field] !== undefined && typeof transform[field] !== 'boolean') {
+            addIssue(issues, `${transformPath}.${field}`, 'invalid-variant', 'Device variant flip settings must be booleans.')
+          }
+        }
+        // The continuous values are repaired rather than refused, so the reader's
+        // own clamping is what the document ends up holding.
+        if (isFiniteNumber(transform.scale) && transform.scale <= 0) {
+          addWarning(issues, `${transformPath}.scale`, 'invalid-variant', 'A device variant scale must be greater than zero; it is clamped on open.')
+        }
+        for (const field of ['widthScale', 'heightScale'] as const) {
+          if (isFiniteNumber(transform[field])
+            && (transform[field] < TRANSFORM_SIZE_MIN || transform[field] > TRANSFORM_SIZE_MAX)) {
+            addWarning(issues, `${transformPath}.${field}`, 'invalid-variant', `Size scale must be between ${TRANSFORM_SIZE_MIN} and ${TRANSFORM_SIZE_MAX}; it is clamped on open.`)
+          }
+        }
+      }
+    }
+  })
 }
 
 /**
@@ -200,6 +354,13 @@ export function validateProjectDocument(value: unknown, options: ValidationOptio
       requireString(asset.path, `${path}.path`, issues)
       if (isString(asset.path) && !isSafeAssetPath(asset.path)) addIssue(issues, `${path}.path`, 'unsafe-asset-path', 'Asset path is unsafe or uses an unsupported scheme.')
       requireString(asset.mimeType, `${path}.mimeType`, issues)
+      // An intrinsic size is a hint for the panoramic overscan, so a bad one is
+      // ignored with a warning rather than a size the canvas has to trust.
+      for (const axis of ['width', 'height'] as const) {
+        if (asset[axis] !== undefined && !(isFiniteNumber(asset[axis]) && asset[axis] > 0)) {
+          addWarning(issues, `${path}.${axis}`, 'invalid-asset-hint', 'An asset intrinsic size must be a positive number; the hint is ignored.')
+        }
+      }
     })
   }
 
@@ -260,6 +421,7 @@ export function validateProjectDocument(value: unknown, options: ValidationOptio
       }
       if (slide.showDeviceStatusBar !== undefined && typeof slide.showDeviceStatusBar !== 'boolean') addIssue(issues, `${path}.showDeviceStatusBar`, 'invalid-device-setting', 'The device status bar flag must be a boolean.')
       if (slide.screenshotFit !== undefined && !isScreenshotFit(slide.screenshotFit)) addIssue(issues, `${path}.screenshotFit`, 'invalid-device-setting', `The screenshot fit must be one of: ${screenshotFitIds.join(', ')}.`)
+      validateBackgroundFill(slide.backgroundFill, `${path}.backgroundFill`, issues)
       validateFrame(slide.frame, `${path}.frame`, issues)
       validateTransform(slide.transform, `${path}.transform`, issues)
       if (!Array.isArray(slide.layers)) {
@@ -293,6 +455,7 @@ export function validateProjectDocument(value: unknown, options: ValidationOptio
         if (layer.opacity !== undefined && (!isFiniteNumber(layer.opacity) || layer.opacity < 0 || layer.opacity > 1)) addIssue(issues, `${layerPath}.opacity`, 'invalid-layer-setting', 'Opacity must be a finite number between 0 and 1.')
         if (layer.visible !== undefined && typeof layer.visible !== 'boolean') addIssue(issues, `${layerPath}.visible`, 'invalid-layer-setting', 'Visibility must be a boolean.')
         validateTransform(layer.transform, `${layerPath}.transform`, issues)
+        validateFocalPoint(layer.focalPoint, `${layerPath}.focalPoint`, issues)
         if (layer.style !== undefined) {
           if (!isRecord(layer.style) || (layer.style.type !== 'circle' && layer.style.type !== 'pill') || (layer.style.color !== undefined && !/^#[0-9a-f]{6}$/i.test(String(layer.style.color)))) addIssue(issues, `${layerPath}.style`, 'invalid-style', 'Shape style is invalid.')
         }
@@ -340,6 +503,7 @@ export function validateProjectDocument(value: unknown, options: ValidationOptio
         if (!isString(id) || !slideIds.has(id)) addIssue(issues, `${path}.slideIds[${slideIndex}]`, 'missing-reference', 'Output variant references a missing slide.')
       })
       else addIssue(issues, `${path}.slideIds`, 'required', 'Output variant slideIds must be an array.')
+      validateDeviceOverrides(variant.deviceOverrides, `${path}.deviceOverrides`, assetIds, issues)
     })
   }
 

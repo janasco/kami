@@ -8,14 +8,15 @@
  * the editor apply it through `commitEditorUpdate` so undo, redo, and autosave
  * behave exactly like a single-slide edit.
  *
- * Only fields the project document already carries are touched, so no schema,
- * migration, or validation change is involved.
+ * Only fields the project document already carries are touched, so a bulk change
+ * is as reversible and as small as the single-slide change it mirrors.
  */
 
-import { getLayout, getTheme, sanitizeLayerOpacity, slideLayerLabels, screenshotFitOptions } from '../data'
+import { backgroundFillOptions, getLayout, getTheme, sanitizeLayerOpacity, slideLayerLabels, screenshotFitOptions } from '../data'
+import { clampFocalPoint, isDefaultFocalPoint, resolveBackgroundFill } from './backgroundFill'
 import { isFramelessDeviceId } from './devicePresets'
 import { describeDeviceFrame } from './flowboardStages'
-import type { DeviceFrameId, LayerId, LayoutId, ScreenshotFit, Slide, ThemeId } from '../types'
+import type { BackgroundFillKind, DeviceFrameId, FocalPoint, LayerId, LayoutId, ScreenshotFit, Slide, ThemeId } from '../types'
 
 /** The three compact groups the bulk action bar can show. */
 export type BulkActionGroup = 'framing' | 'style' | 'layers'
@@ -26,6 +27,8 @@ export type BulkSlideAction =
   | { kind: 'device-status-bar'; visible: boolean }
   | { kind: 'layout'; layout: LayoutId }
   | { kind: 'theme'; theme: ThemeId }
+  | { kind: 'background-fill'; backgroundFill: BackgroundFillKind }
+  | { kind: 'focal-point'; focalPoint: FocalPoint }
   | { kind: 'layer-visibility'; layerId: LayerId; visible: boolean }
   | { kind: 'layer-opacity'; layerId: LayerId; opacity: number }
 
@@ -42,6 +45,8 @@ export const bulkActionValue = (action: BulkSlideAction): string => {
     case 'device-status-bar': return action.visible ? 'on' : 'off'
     case 'layout': return action.layout
     case 'theme': return action.theme
+    case 'background-fill': return action.backgroundFill
+    case 'focal-point': return `${action.focalPoint.x},${action.focalPoint.y}`
     case 'layer-visibility': return `${action.layerId}:${action.visible ? 'visible' : 'hidden'}`
     case 'layer-opacity': return String(action.opacity)
   }
@@ -60,6 +65,10 @@ export const describeBulkSlideAction = (action: BulkSlideAction): string => {
       return `Layout set to ${getLayout(action.layout).name}`
     case 'theme':
       return `Theme set to ${getTheme(action.theme).name}`
+    case 'background-fill':
+      return `Background fill set to ${backgroundFillOptions.find((option) => option.id === action.backgroundFill)?.label ?? 'Theme'}`
+    case 'focal-point':
+      return `Background focal point set to ${Math.round(action.focalPoint.x * 100)}% across, ${Math.round(action.focalPoint.y * 100)}% down`
     case 'layer-visibility':
       return `${action.visible ? 'Show' : 'Hide'} the ${slideLayerLabels[action.layerId].toLowerCase()} layer`
     case 'layer-opacity':
@@ -74,14 +83,29 @@ export const describeBulkSlideResult = (action: BulkSlideAction, changedCount: n
 }
 
 /**
+ * Extra copy a fill action needs, because part of the selection may not be able
+ * to honour it. An image or panoramic fill on a slide with no background image
+ * still saves, and still degrades to the theme paint on export.
+ */
+export const describeBulkSlideCaveat = (action: BulkSlideAction, slides: readonly Slide[]): string | null => {
+  if (action.kind !== 'background-fill') return null
+  if (action.backgroundFill !== 'image' && action.backgroundFill !== 'panoramic') return null
+  const withoutImage = slides.filter((slide) => !slide.backgroundImage).length
+  if (withoutImage === 0) return null
+  return `${withoutImage} selected slide${withoutImage === 1 ? ' has' : 's have'} no background image, so the theme paint shows until one is added.`
+}
+
+/**
  * History merge key for a bulk edit.
  *
  * Discrete choices include their value, so flipping between two options always
- * records its own undo step. The opacity slider leaves the value out, matching
- * the existing per-slide slider, so a drag coalesces into one entry.
+ * records its own undo step. The opacity slider and the focal point leave the
+ * value out, matching the existing per-slide sliders, so a drag coalesces into
+ * one entry.
  */
 export const bulkActionMergeKey = (action: BulkSlideAction, slideIds: readonly string[]): string => {
   const scope = `bulk:${slideIds.length}`
+  if (action.kind === 'focal-point') return `${scope}:focal-point`
   if (action.kind === 'layer-opacity') return `${scope}:layer-opacity:${action.layerId}`
   return `${scope}:${action.kind}:${bulkActionValue(action)}`
 }
@@ -105,6 +129,28 @@ export const applyBulkSlideAction = (slide: Slide, action: BulkSlideAction): Sli
       return slide.layout === action.layout ? null : { ...slide, layout: action.layout }
     case 'theme':
       return slide.theme === action.theme ? null : { ...slide, theme: action.theme }
+    case 'background-fill': {
+      // Re-resolved through the same normalizer the renderer and the document
+      // use, so a bulk change lands on exactly the record a hand-set fill would.
+      const next = resolveBackgroundFill({ ...slide.backgroundFill, kind: action.backgroundFill })
+      const current = resolveBackgroundFill(slide.backgroundFill)
+      if (current.kind === next.kind) return null
+      return {
+        ...slide,
+        ...(next.kind === 'theme' ? { backgroundFill: undefined } : { backgroundFill: next }),
+      }
+    }
+    case 'focal-point': {
+      const next = clampFocalPoint(action.focalPoint)
+      const current = clampFocalPoint(slide.backgroundFocalPoint)
+      if (current.x === next.x && current.y === next.y) return null
+      // The centre is stored as no field at all, so a slide can go back to
+      // being unframed and stop claiming a focal point nobody chose.
+      return {
+        ...slide,
+        backgroundFocalPoint: isDefaultFocalPoint(next) ? undefined : next,
+      }
+    }
     case 'layer-visibility': {
       const settings = slide.layerSettings[action.layerId]
       if (!settings || settings.visible === action.visible) return null
