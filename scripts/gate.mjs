@@ -34,6 +34,7 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { TestIdentityError, nonPortableIdentities, testIdentity } from './gate/testIdentity.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const baselinePath = resolve(root, 'scripts/gate/baseline.json')
@@ -112,42 +113,32 @@ const readRun = () => {
 /**
  * A test's identity, independent of where the machine happens to be.
  *
- * vitest reports absolute file paths, and the shape of that path is
- * platform-specific: `C:/Users/.../src/lib/x.test.ts` on Windows,
- * `/home/runner/work/kami/kami/src/lib/x.test.ts` on Linux. Recording those
- * verbatim meant the recorded baseline could only ever be compared on the
- * machine that produced it — on CI every single recorded test would have looked
- * removed, and the check that exists to stop a test being deleted would instead
- * have failed on a rename of the checkout directory.
- *
- * So the identity is the repo-relative path, POSIX-normalised, plus the test's
- * full name.
- *
- * The fallback when a path is not under `src/` returns the path unshortened,
- * which is the whole absolute path and therefore machine-specific again. That
- * is not hypothetical: vitest's `include` is `src/**`, so today every test file
- * is under `src/`, but a test directory added outside it would quietly give
- * those tests an identity that only holds on the machine that recorded them —
- * and deleting one of them would then be invisible, on this machine and on CI
- * alike. `unshortenedIdentities` below turns that into a gate failure instead.
+ * The rule, and the reasoning behind it, live in `./gate/testIdentity.mjs`,
+ * which is where `src/gate/repoRelative.test.ts` tests it. The short version:
+ * the identity is the repo-relative POSIX path plus the test's full name, and a
+ * path that cannot be expressed relative to *this* checkout is an error rather
+ * than an identity, because an identity that embeds `C:/Users/...` compares
+ * equal only on the machine that recorded it and is invisibly deletable
+ * everywhere else.
  */
-const repoRelative = (file) => {
-  const normalised = file.replace(/\\/g, '/')
-  const marker = '/src/'
-  const at = normalised.lastIndexOf(marker)
-  return at >= 0 ? normalised.slice(at + 1) : normalised
+const identityErrors = []
+const identityFor = (file, testName) => {
+  try {
+    return testIdentity(file, testName, root)
+  } catch (error) {
+    // Collected rather than thrown, so one unresolvable path becomes a gate
+    // result naming the file rather than a stack trace and a missing summary.
+    identityErrors.push(error instanceof TestIdentityError ? error : new TestIdentityError(String(file), String(error)))
+    // Deliberately the unshortened path: it is the one thing guaranteed to be
+    // rejected by `nonPortableIdentities` below, so the failure is reported by
+    // the same check that catches a hand-edited baseline.
+    return `${file} :: ${testName}`
+  }
 }
-
-/** True when an identity still embeds an absolute path, i.e. is not portable. */
-const unshortenedIdentities = (identities) =>
-  identities.filter((name) => {
-    const file = name.slice(0, name.indexOf(' :: '))
-    return !file.startsWith('src/')
-  })
 
 const currentTests = (report) =>
   (report?.testResults ?? []).flatMap((file) =>
-    (file.assertionResults ?? []).map((t) => `${repoRelative(file.name)} :: ${t.fullName ?? t.title}`),
+    (file.assertionResults ?? []).map((t) => identityFor(file.name, t.fullName ?? t.title)),
   )
 
 /**
@@ -164,7 +155,7 @@ const failuresIn = (report) =>
   (report?.testResults ?? []).flatMap((file) =>
     (file.assertionResults ?? [])
       .filter((t) => t.status && t.status !== 'passed')
-      .map((t) => `  FAIL ${repoRelative(file.name)} :: ${t.fullName ?? t.title}\n${(t.failureMessages ?? []).join('\n')}`),
+      .map((t) => `  FAIL ${identityFor(file.name, t.fullName ?? t.title)}\n${(t.failureMessages ?? []).join('\n')}`),
   )
 
 const run1 = readRun()
@@ -181,14 +172,27 @@ if (!current.length) {
   record('test count', count >= MIN_TEST_COUNT, `${count} tests, floor is ${MIN_TEST_COUNT}`)
 
   if (updateBaseline) {
-    const next = {
-      recordedAt: new Date().toISOString(),
-      minTestCount: MIN_TEST_COUNT,
-      testCount: count,
-      tests: current.slice().sort(),
+    // `--update` is the one path that *writes* identities, so it is the one path
+    // where a bad identity is not merely a failed comparison but a corrupted
+    // baseline that every machine then inherits. Refuse rather than record.
+    const unportable = [...nonPortableIdentities(current), ...identityErrors.map((error) => error.message)]
+    if (unportable.length) {
+      record(
+        'baseline re-recorded',
+        false,
+        `refusing to re-record: ${unportable.length} test(s) have no portable identity, so the baseline would only ` +
+          `ever compare on the machine that wrote it. First: ${unportable[0]}`,
+      )
+    } else {
+      const next = {
+        recordedAt: new Date().toISOString(),
+        minTestCount: MIN_TEST_COUNT,
+        testCount: count,
+        tests: current.slice().sort(),
+      }
+      writeFileSync(baselinePath, `${JSON.stringify(next, null, 2)}\n`)
+      record('baseline re-recorded', true, `${count} tests written to scripts/gate/baseline.json`)
     }
-    writeFileSync(baselinePath, `${JSON.stringify(next, null, 2)}\n`)
-    record('baseline re-recorded', true, `${count} tests written to scripts/gate/baseline.json`)
   } else if (!existsSync(baselinePath)) {
     record(
       'test integrity',
@@ -200,12 +204,16 @@ if (!current.length) {
     const before = new Set(baseline.tests)
     const after = new Set(current)
 
-    // A test whose identity is still an absolute path is one whose identity
-    // depends on where the checkout lives. Comparing those to a baseline
-    // recorded elsewhere is meaningless in both directions, so refuse rather
-    // than report a confident wrong answer. This shares the verdict slot with
-    // the removal check below, so the gate still records exactly seven results.
-    const unportable = unshortenedIdentities(current)
+    // A test whose identity still says where the checkout lives cannot be
+    // compared to a baseline recorded anywhere else: the comparison is
+    // meaningless in both directions, so refuse rather than report a confident
+    // wrong answer. This shares the verdict slot with the removal check below,
+    // so the gate still records exactly seven results.
+    const unportable = [
+      ...nonPortableIdentities(current),
+      ...nonPortableIdentities([...before]),
+      ...identityErrors.map((error) => error.message),
+    ]
     const removed = [...before].filter((name) => !after.has(name))
     const added = [...after].filter((name) => !before.has(name))
 
@@ -214,8 +222,9 @@ if (!current.length) {
         'no test removed or renamed',
         false,
         `${unportable.length} test(s) have a non-portable identity, so the baseline cannot be compared: ` +
-          `${unportable[0].slice(0, unportable[0].indexOf(' :: '))}. ` +
-          'vitest include is src/**, so this means a test file lives outside src/ and repoRelative() cannot shorten it',
+          `${identityErrors.length ? identityErrors[0].message : unportable[0]}. ` +
+          'An identity must be a repo-relative path (e.g. src/lib/x.test.ts) plus " :: " plus the test name; ' +
+          'one that embeds the absolute checkout path only ever matches the machine that recorded it',
       )
     } else if (removed.length) {
       // A removed test is the failure mode this whole check exists for. A renamed

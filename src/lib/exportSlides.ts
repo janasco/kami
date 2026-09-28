@@ -12,6 +12,76 @@ export type ExportProgress = {
 const waitForBrowser = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0))
 
 /**
+ * How long the export waits for the document's webfonts before giving up.
+ *
+ * Generous on purpose. `document.fonts.ready` resolves once every pending font
+ * load has settled, and the only fonts in play are the two families
+ * `src/styles.css` imports from Google Fonts — a handful of weights, fetched
+ * once per session and already warm by the time a user finishes composing a
+ * deck. On a slow connection that is seconds, not tens of seconds, so fifteen is
+ * roughly an order of magnitude of headroom over the worst legitimate case: no
+ * realistic network makes a real user wait this long, which is the point. The
+ * value is a bound on a *hang*, not a target. Tightening it to something that
+ * merely sounds safe (two or three seconds) would convert a slow export into a
+ * failed one, and a failed export is worse than a slow one — the user loses the
+ * work of the click and has to press it again.
+ */
+export const FONT_READY_TIMEOUT_MS = 15_000
+
+/**
+ * The message a timed-out font wait produces.
+ *
+ * Written for the person watching the export bar, not for a log. It says what
+ * stopped, why the result would have been wrong, and what to do about it, in
+ * that order, because "Fonts did not load" alone leaves the reader to guess
+ * whether their file is safe.
+ */
+export const fontReadyTimeoutMessage = (ms: number) =>
+  `Fonts did not finish loading within ${Math.round(ms / 1000)} seconds, so the PNGs would have been drawn with the wrong typeface. ` +
+  'Nothing was downloaded. Check your internet connection, or try again once the page has settled.'
+
+/**
+ * Awaits `document.fonts.ready`, bounded.
+ *
+ * **Fatal, not a warning.** The alternative — log it and carry on — produces a
+ * ZIP that looks finished and is not: the whole point of the wait is that
+ * `html-to-image` rasterises text through a foreignObject, and if the families
+ * are not loaded the browser falls back to a system face with different metrics,
+ * so headlines reflow, wrap, and can overflow the frame. That is a silently
+ * wrong deliverable in the exact shape a store screenshot must not be, and this
+ * function's caller already has one error path that shows a message and
+ * downloads nothing, so a warning would need a second, quieter channel to carry
+ * a defect the user cannot see in the file. Failing loudly and pointing at the
+ * retry is strictly better than succeeding with broken type.
+ *
+ * The error is deliberately distinguishable from every other export failure, so
+ * a report of "the export failed" can name the cause rather than leave the user
+ * guessing which of six throws it was.
+ */
+export const waitForFonts = async (timeoutMs: number = FONT_READY_TIMEOUT_MS): Promise<void> => {
+  // Older engines, and the non-DOM environments the module is imported in, have
+  // no FontFaceSet at all. There is nothing to wait for, and the original
+  // `'fonts' in document` guard is the right behaviour, not a workaround.
+  if (!('fonts' in document)) return
+
+  let timer: number | undefined
+  const expiry = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(fontReadyTimeoutMessage(timeoutMs))), timeoutMs)
+  })
+
+  try {
+    // `fonts.ready` resolves once every pending load has settled and never
+    // rejects, so racing it against a timer is the whole mechanism. The
+    // `finally` disarms that timer once the fonts win: otherwise every fast
+    // export leaves a live 15-second timer behind for the rest of the session,
+    // on a page whose entire purpose is long editing sessions.
+    await Promise.race([document.fonts.ready, expiry])
+  } finally {
+    window.clearTimeout(timer)
+  }
+}
+
+/**
  * The project name turned into the ZIP filename.
  *
  * Exported so a surface that names the download before it happens, such as the
@@ -94,9 +164,7 @@ export async function exportSlidesAsZip({ projectName, entries, profile, stage, 
     throw new Error('The export canvas is not ready. Try exporting again.')
   }
 
-  if ('fonts' in document) {
-    await document.fonts.ready
-  }
+  await waitForFonts()
 
   const archive = await writeExportArchive(
     new JSZip(),
