@@ -13,16 +13,38 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      # Node 24, not 20. jsdom@30 declares `^22.22.2 || ^24.15.0 || >=26.0.0`,
+      # and five test files opt into `// @vitest-environment jsdom`. Node 20 was
+      # never a supported runtime for this suite, it just failed quietly: the
+      # engine mismatch is a warning, not an install error, so the tests ran on
+      # a runtime their own dependency disclaims. 24 is also the version the
+      # gate baseline was recorded on, and the test-integrity check compares
+      # test names, so CI and the recording machine have to be the same major.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Validate project, templates, and demo
-        run: npm run check:project
-      - name: Run unit tests
-        run: npm test
+      # The gate is the whole verification, and it deliberately subsumes the two
+      # steps that used to live here. `npm run check:project` and `npm test` are
+      # already checks 6 and 2 of seven; running them again alongside it would
+      # repeat a full vitest pass for no extra signal, on a suite that is
+      # hundreds of tests.
+      #
+      # What the gate adds that CI did not have: the test-integrity manifest
+      # (so "all tests pass" can no longer be met by deleting an awkward test)
+      # and the byte-identity round trip over 8 documents. Neither was running
+      # anywhere but on a developer machine that remembered to ask.
+      #
+      # The gate runs vitest with a JSON reporter, so the familiar per-file
+      # output is not in the log. It prints the failing test names itself when
+      # the run is red, which is why nothing is lost by dropping `npm test`.
+      - name: Run the rewrite gate
+        run: npm run gate
+      # `npm run build` is the one verification the gate does not do: tsc
+      # typechecks, but nothing in the gate asks whether Vite can actually
+      # bundle the app or emit the SPA fallback. Keep it.
       - name: Build Vite app
         run: npm run build

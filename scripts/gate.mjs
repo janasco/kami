@@ -69,17 +69,36 @@ const run = (label, command, args) => {
   return result.status === 0
 }
 
+/**
+ * Resolve tools from this checkout only, never from the registry.
+ *
+ * Plain `npx <tool>` silently downloads the tool if it is not in
+ * `node_modules/.bin`, and it is *worse* in CI, where `CI=true` makes npm
+ * answer yes to the install prompt instead of asking. So a missing dependency
+ * would not fail the gate, it would run the newest version published that
+ * minute and report the result as if it were the pinned one. For the round
+ * trip that is the most damaging possible failure: the strongest check in the
+ * gate would be executed by a tool the project never chose.
+ *
+ * `--offline` resolves the local binary and turns a missing one into a hard
+ * ENOTCACHED error. (`--no-install` looks like the obvious spelling of this and
+ * is not: npm 11 ignores it and fetches anyway.) Verified against a cold cache,
+ * which is the condition on a fresh runner, where the local binary is all
+ * there is.
+ */
+const npx = ['--offline', '--']
+
 process.stdout.write('kami-rewrite-gate\n')
 
 // ---------------------------------------------------------------------------
 // 1. Types. A rewrite that does not compile is not a rewrite.
 // ---------------------------------------------------------------------------
-record('tsc -b', run('typecheck', 'npx', ['tsc', '-b']))
+record('tsc -b', run('typecheck', 'npx', [...npx, 'tsc', '-b']))
 
 // ---------------------------------------------------------------------------
 // 2. Tests, plus the test-integrity boundary.
 // ---------------------------------------------------------------------------
-record('tests', run('tests', 'npx', ['vitest', 'run', '--reporter=json', `--outputFile=${reportPath}`, '--silent']))
+record('tests', run('tests', 'npx', [...npx, 'vitest', 'run', '--reporter=json', `--outputFile=${reportPath}`, '--silent']))
 
 const readRun = () => {
   if (!existsSync(reportPath)) return null
@@ -90,13 +109,70 @@ const readRun = () => {
   }
 }
 
+/**
+ * A test's identity, independent of where the machine happens to be.
+ *
+ * vitest reports absolute file paths, and the shape of that path is
+ * platform-specific: `C:/Users/.../src/lib/x.test.ts` on Windows,
+ * `/home/runner/work/kami/kami/src/lib/x.test.ts` on Linux. Recording those
+ * verbatim meant the recorded baseline could only ever be compared on the
+ * machine that produced it — on CI every single recorded test would have looked
+ * removed, and the check that exists to stop a test being deleted would instead
+ * have failed on a rename of the checkout directory.
+ *
+ * So the identity is the repo-relative path, POSIX-normalised, plus the test's
+ * full name.
+ *
+ * The fallback when a path is not under `src/` returns the path unshortened,
+ * which is the whole absolute path and therefore machine-specific again. That
+ * is not hypothetical: vitest's `include` is `src/**`, so today every test file
+ * is under `src/`, but a test directory added outside it would quietly give
+ * those tests an identity that only holds on the machine that recorded them —
+ * and deleting one of them would then be invisible, on this machine and on CI
+ * alike. `unshortenedIdentities` below turns that into a gate failure instead.
+ */
+const repoRelative = (file) => {
+  const normalised = file.replace(/\\/g, '/')
+  const marker = '/src/'
+  const at = normalised.lastIndexOf(marker)
+  return at >= 0 ? normalised.slice(at + 1) : normalised
+}
+
+/** True when an identity still embeds an absolute path, i.e. is not portable. */
+const unshortenedIdentities = (identities) =>
+  identities.filter((name) => {
+    const file = name.slice(0, name.indexOf(' :: '))
+    return !file.startsWith('src/')
+  })
+
 const currentTests = (report) =>
   (report?.testResults ?? []).flatMap((file) =>
-    (file.assertionResults ?? []).map((t) => `${file.name} :: ${t.fullName ?? t.title}`),
+    (file.assertionResults ?? []).map((t) => `${repoRelative(file.name)} :: ${t.fullName ?? t.title}`),
+  )
+
+/**
+ * Diagnostics, not a check.
+ *
+ * The gate runs vitest with `--reporter=json --silent` and reads the machine
+ * report rather than the console, which is what makes the baseline comparison
+ * possible. The cost is that the familiar per-file output is gone, so a red run
+ * in CI used to say only "tests: undefined". The report has the names and
+ * messages, so print them. This records nothing and changes no exit code; it
+ * only makes a failure legible.
+ */
+const failuresIn = (report) =>
+  (report?.testResults ?? []).flatMap((file) =>
+    (file.assertionResults ?? [])
+      .filter((t) => t.status && t.status !== 'passed')
+      .map((t) => `  FAIL ${repoRelative(file.name)} :: ${t.fullName ?? t.title}\n${(t.failureMessages ?? []).join('\n')}`),
   )
 
 const run1 = readRun()
 const current = currentTests(run1)
+const failedTests = failuresIn(run1)
+if (failedTests.length) {
+  process.stdout.write(`\n${failedTests.length} failing test(s):\n${failedTests.join('\n')}\n`)
+}
 
 if (!current.length) {
   record('test integrity', false, 'no test report could be read, so the baseline cannot be compared')
@@ -124,13 +200,27 @@ if (!current.length) {
     const before = new Set(baseline.tests)
     const after = new Set(current)
 
+    // A test whose identity is still an absolute path is one whose identity
+    // depends on where the checkout lives. Comparing those to a baseline
+    // recorded elsewhere is meaningless in both directions, so refuse rather
+    // than report a confident wrong answer. This shares the verdict slot with
+    // the removal check below, so the gate still records exactly seven results.
+    const unportable = unshortenedIdentities(current)
     const removed = [...before].filter((name) => !after.has(name))
     const added = [...after].filter((name) => !before.has(name))
 
-    // A removed test is the failure mode this whole check exists for. A renamed
-    // test shows up here as one removal plus one addition, so renaming cannot
-    // quietly delete coverage either.
-    if (removed.length) {
+    if (unportable.length) {
+      record(
+        'no test removed or renamed',
+        false,
+        `${unportable.length} test(s) have a non-portable identity, so the baseline cannot be compared: ` +
+          `${unportable[0].slice(0, unportable[0].indexOf(' :: '))}. ` +
+          'vitest include is src/**, so this means a test file lives outside src/ and repoRelative() cannot shorten it',
+      )
+    } else if (removed.length) {
+      // A removed test is the failure mode this whole check exists for. A renamed
+      // test shows up here as one removal plus one addition, so renaming cannot
+      // quietly delete coverage either.
       record(
         'no test removed or renamed',
         false,
@@ -168,6 +258,7 @@ process.stdout.write('\n── round trip\n')
 const bundle = spawnSync(
   'npx',
   [
+    ...npx,
     'esbuild',
     'scripts/gate/roundtrip.ts',
     '--bundle',
