@@ -44,10 +44,18 @@ const noop = () => undefined
 const shipProps = (
   overrides: Partial<FlowboardProps> = {},
   makeVariants?: (slides: Slide[]) => OutputVariant[],
+  /**
+   * A store target the variants do not aim at.
+   *
+   * The stage derives its profile from the variants, which is right for every
+   * other test here. The empty-plan case is the one where they disagree, so the
+   * store target has to be overridable for the reproduction to be expressible.
+   */
+  profileId?: ExportProfileId,
 ): ShipStageProps => {
   const base = makeFlowboardProps(overrides)
   const resolved = makeVariants ? makeVariants(base.slides) : base.variants
-  const profile = exportProfiles.find((entry) => entry.id === resolved[0]?.exportProfileId) ?? base.profile
+  const profile = exportProfiles.find((entry) => entry.id === (profileId ?? resolved[0]?.exportProfileId)) ?? base.profile
   const preflight = runExportPreflight({
     profile,
     slides: base.slides,
@@ -67,13 +75,30 @@ const shipProps = (
     preflight,
     exportEntries: plan.entries,
     exportBlockedVariant: plan.blocked,
-    exportGate: resolveFlowboardExportGate({ exportStatus: 'idle', preflight, slideCount: base.slides.length }),
+    exportUnassigned: plan.unassigned,
+    exportGate: resolveFlowboardExportGate({
+      exportStatus: 'idle',
+      preflight,
+      slideCount: base.slides.length,
+      unassigned: plan.unassigned,
+    }),
     onGoToSlide: base.onSelect,
     activeLocale: base.activeLocale,
   }
 }
 
 const render = (props: ShipStageProps) => renderToStaticMarkup(createElement(ShipStage, props))
+
+/**
+ * The Ship stage's own Export control, read out of the markup.
+ *
+ * Matched by its class rather than by its label, because the label is one of the
+ * things under test: a gate that blocks for a new reason gets new copy, and a
+ * test that found the button by its text would stop finding it exactly when the
+ * behaviour changed.
+ */
+const primaryExportButton = (markup: string): string =>
+  markup.match(/<button class="button button--primary flowboard-wide-action"[^>]*>/)?.[0] ?? ''
 
 /** Two variants for whatever deck it is handed, both aimed at one store target. */
 const twoVariants = (profileId: ExportProfileId) => (deck: Slide[]): OutputVariant[] => [
@@ -158,6 +183,42 @@ describe('the export manifest on the Ship stage', () => {
     const markup = render(shipProps({}, () => []))
     expect(markup).not.toContain('In the ZIP')
     expect(markup).not.toContain('ship-manifest__table')
+  })
+
+  /**
+   * The absence of a manifest is not a refusal.
+   *
+   * The test above is satisfied by a plan that is empty *and* unexplained, which
+   * is the bug: a deck whose variants all aim at one store target, switched to
+   * another, planned zero files, passed preflight, reported a green ✓ on the
+   * "Device variants" row, offered an enabled Export, and finished with
+   * "downloaded with 0 PNGs". The manifest is not where the author learns
+   * whether the export is possible, so the control itself is the assertion.
+   */
+  it('disables the export when the plan has no files and says which store target has none', () => {
+    // Both variants aim at the App Store; the author has switched the store
+    // target to Google Play, so nothing in the deck aims at what is selected.
+    const props = shipProps({}, twoVariants('app-store'), 'google-play')
+    const markup = render(props)
+
+    expect(props.profile.id).toBe('google-play')
+    expect(props.exportEntries).toHaveLength(0)
+    expect(primaryExportButton(markup)).toMatch(/\sdisabled(=|\s|>)/)
+    // And the reason is stated, rather than the button simply being dead.
+    expect(markup).toContain('No device variant targets')
+    expect(markup).toContain('Google Play phone portrait')
+  })
+
+  it('disables the export when every variant for the store target is turned off', () => {
+    // The same empty plan by a different route: the variants do aim at the
+    // selected store target, and the author has switched all of them off.
+    const props = shipProps({}, (deck) => twoVariants('google-play')(deck).map((variant) => ({ ...variant, enabled: false })))
+    const markup = render(props)
+
+    expect(props.profile.id).toBe('google-play')
+    expect(props.exportEntries).toHaveLength(0)
+    expect(primaryExportButton(markup)).toMatch(/\sdisabled(=|\s|>)/)
+    expect(markup).toContain('turned off')
   })
 })
 

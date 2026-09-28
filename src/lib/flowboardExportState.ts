@@ -8,12 +8,22 @@
  * let the two surfaces disagree, for example a blocked deck that still showed an
  * enabled Export in the top bar.
  *
- * `resolveFlowboardExportGate` folds the export status and the preflight result
- * into one value that both surfaces render, so the answer cannot drift. It is a
- * pure function of state the editor already holds: nothing here is serialized,
- * and the project format, validation, and export pipeline are untouched.
+ * `resolveFlowboardExportGate` folds the export status, the preflight result,
+ * and the export plan's own refusal into one value that both surfaces render, so
+ * the answer cannot drift. It is a pure function of state the editor already
+ * holds: nothing here is serialized, and the project format, validation, and
+ * export pipeline are untouched.
+ *
+ * The plan's refusal is the third input because preflight and the plan fail
+ * independently and were previously both allowed to be silent. Preflight checks
+ * the deck against the profile; the plan decides whether the profile has any
+ * files to write. A deck whose variants all target the App Store, switched to
+ * Google Play, passed every preflight check — there is nothing wrong with the
+ * deck — and then planned zero files, because no variant targets the profile the
+ * author selected. With only the preflight in the gate, that read as ready.
  */
 
+import { unassignedExportRefusal, type ExportPlanUnassigned } from './exportPlan'
 import type { ExportPreflightResult } from './exportPreflight'
 
 /** Mirrors the `ExportStatus` type the toolbar and the App shell own. */
@@ -22,6 +32,17 @@ export type FlowboardExportStatus = 'idle' | 'exporting' | 'success' | 'error' |
 export interface FlowboardExportGateInput {
   exportStatus: FlowboardExportStatus
   preflight: Pick<ExportPreflightResult, 'status' | 'blockingIssues' | 'warningIssues' | 'issues'>
+  /**
+   * Why the plan has no files in it, when it has none.
+   *
+   * Optional and additive, like `ExportPreflightInput.variants`: a caller that
+   * knows nothing about the plan gets exactly the gate it got before the field
+   * existed. It is a refusal, so it blocks — an export button that offers to
+   * write an empty ZIP and then reports success is the failure this field
+   * exists to prevent, and no surface that renders the gate may enable the
+   * control while it is set.
+   */
+  unassigned?: ExportPlanUnassigned | null
   /** Slides in the deck, for the button and progress copy. */
   slideCount: number
   /** Slides already written, while an export runs. */
@@ -34,7 +55,7 @@ export interface FlowboardExportGateInput {
 }
 
 /** Why the export control is in its current state. */
-export type FlowboardExportGateReason = 'ready' | 'warnings' | 'blocked' | 'exporting'
+export type FlowboardExportGateReason = 'ready' | 'warnings' | 'blocked' | 'unassigned' | 'exporting'
 
 export interface FlowboardExportGate {
   /** The one value every Export control must read. */
@@ -42,9 +63,18 @@ export interface FlowboardExportGate {
   reason: FlowboardExportGateReason
   /** True while an export is running, so progress copy stays honest. */
   exporting: boolean
-  /** True when a preflight blocking issue stops the export. */
+  /**
+   * True when something stops the export: a preflight blocking issue, or a plan
+   * that has no files in it and has said why.
+   */
   blocked: boolean
-  /** 1-based deck numbers of the first blocking issue, empty unless blocked. */
+  /**
+   * 1-based deck numbers of the first blocking issue, empty unless blocked.
+   *
+   * Empty for an `unassigned` gate, and empty on purpose: none of the four
+   * reasons an empty plan is empty is about a particular slide, so there is no
+   * slide for an "Open slide" affordance to point at.
+   */
   slideNumbers: number[]
   /** Sentence shared by the top bar title and the Ship stage hint. */
   message: string
@@ -65,16 +95,21 @@ const plural = (count: number, singular: string) =>
   `${count} ${count === 1 ? singular : `${singular}s`}`
 
 /**
- * Folds the running export status and the preflight result into one gate.
+ * Folds the running export status, the preflight result, and the plan's own
+ * refusal into one gate.
  *
  * A blocking preflight issue always wins, because it is the state the author has
- * to fix first, and it keeps its slide numbers in the message. A running export
- * comes next, since a second run would overwrite the first. Warnings never
- * block: they are reported in the message and the export stays available.
+ * to fix first, and it keeps its slide numbers in the message. A plan with
+ * nothing in it comes next, and it blocks for the same reason: an enabled Export
+ * control that writes an empty ZIP and reports success loses the author's work
+ * silently, which is worse than a refused export. A running export comes after
+ * both, since a second run would overwrite the first. Warnings never block:
+ * they are reported in the message and the export stays available.
  */
 export const resolveFlowboardExportGate = ({
   exportStatus,
   preflight,
+  unassigned = null,
   slideCount,
   completed = 0,
   total,
@@ -99,6 +134,35 @@ export const resolveFlowboardExportGate = ({
           : `Export blocked: ${first.message}`
         : 'Export blocked: resolve the blocking checks before exporting.',
       label: 'Resolve blocking checks',
+      warningCount,
+    }
+  }
+
+  /*
+   * A plan with nothing in it, and a stated reason why.
+   *
+   * This sits below the preflight block and above the running export, which is
+   * the only ordering that is right for both: a blocking check names something
+   * concrete to fix, so it leads, and an export that is already running is a
+   * fact about the past rather than an invitation, so a plan that has just
+   * emptied does not interrupt it.
+   *
+   * `blocked: true` is what makes every surface that already renders refusals
+   * pick this up without knowing the reason exists — the top bar's title, the
+   * guided step's paragraph, and the Ship stage's export hint all read that one
+   * flag. `slideNumbers` is empty on purpose: none of the four reasons is about
+   * a particular slide, so there is nothing for an "Open slide" control to point
+   * at, and a fabricated slide number would be a worse lie than none.
+   */
+  if (unassigned) {
+    return {
+      enabled: false,
+      reason: 'unassigned',
+      exporting: false,
+      blocked: true,
+      slideNumbers: [],
+      message: unassignedExportRefusal(unassigned),
+      label: 'Choose a device variant to export',
       warningCount,
     }
   }

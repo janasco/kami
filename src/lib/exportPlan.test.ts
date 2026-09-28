@@ -6,8 +6,11 @@ import {
   exportEntryName,
   exportEntryNames,
   planExportEntries,
+  unassignedExportRefusal,
   variantExportRefusal,
   type ExportEntry,
+  type ExportPlan,
+  type ExportPlanUnassigned,
 } from './exportPlan'
 import { createTestSlide, VALID_PNG_DATA_URL } from '../test/projectFixtures'
 import type { OutputVariant, Slide } from '../types'
@@ -131,6 +134,100 @@ describe('planExportEntries', () => {
     expect(plan.blocked).toBeNull()
     expect(plan.entries).toHaveLength(1)
   })
+
+  /**
+   * Every route to an empty plan, plus one plan that is not empty.
+   *
+   * Six inputs reach `entries: []`, and they get there for unrelated reasons, so
+   * a check written against any one of them proves nothing about the other five.
+   * They are listed together for that reason: the invariant below is the one
+   * that has to hold across all of them, and it does not name a route.
+   */
+  const everyRoute = (): ExportPlan[] => {
+    const plan = (over: Partial<Parameters<typeof planExportEntries>[0]>): ExportPlan =>
+      planExportEntries({
+        slides: deck(2),
+        variants: [variant()],
+        profileId: 'app-store',
+        requiresScreenshot: true,
+        ...over,
+      })
+    return [
+      // The healthy case, so the invariant is not vacuously true.
+      plan({}),
+      // No variant targets the profile the author has selected.
+      plan({ profileId: 'google-play' }),
+      // Every variant that targets it is turned off.
+      plan({ variants: [variant({ exportProfileId: 'google-play', enabled: false })], profileId: 'google-play' }),
+      // A hand-edited document whose `slideIds` is not an array at all.
+      plan({ variants: [variant({ slideIds: undefined as never })] }),
+      // A variant that names no slide.
+      plan({ variants: [variant({ slideIds: [] })] }),
+      // A variant naming only slides the deck no longer has.
+      plan({ variants: [variant({ slideIds: ['gone-1', 'gone-2'] })] }),
+      // A deck with no slides in it.
+      plan({ slides: [] }),
+    ]
+  }
+
+  it('never plans zero files without saying so', () => {
+    for (const plan of everyRoute()) {
+      // A deck that has slides must never plan zero files without saying so.
+      //
+      // `blocked` is a *variant* refusal, so it is the wrong thing to ask: it is
+      // null for a plan whose emptiness has no variant to blame, which is every
+      // route above. `unassigned` is the channel emptiness speaks through, and it
+      // is set exactly when the loop wrote nothing. The converse holds too — a
+      // plan with files in it has nothing to explain — so this is an equality and
+      // not only an implication.
+      expect(plan.entries.length === 0).toBe(plan.unassigned !== null)
+    }
+  })
+
+  it('names the store target by name, not by id, in the refusal', () => {
+    const plan = planExportEntries({
+      slides: deck(2),
+      variants: [variant()],
+      profileId: 'google-play',
+      requiresScreenshot: true,
+    })
+
+    expect(plan.unassigned).toEqual({
+      reason: 'no-variant-for-profile',
+      profileId: 'google-play',
+      profileName: 'Google Play phone portrait',
+      variantId: null,
+      variantName: null,
+    })
+    expect(unassignedExportRefusal(plan.unassigned!)).toContain('“Google Play phone portrait”')
+    expect(unassignedExportRefusal(plan.unassigned!)).not.toContain('google-play')
+  })
+
+  it('distinguishes the four reasons, so the sentence names the right fix', () => {
+    const reasonFor = (over: Partial<Parameters<typeof planExportEntries>[0]>): string =>
+      planExportEntries({
+        slides: deck(2),
+        variants: [variant()],
+        profileId: 'app-store',
+        requiresScreenshot: true,
+        ...over,
+      }).unassigned?.reason ?? 'none'
+
+    // The reported route: every variant aims at the App Store and the author has
+    // selected Google Play.
+    expect(reasonFor({ profileId: 'google-play' })).toBe('no-variant-for-profile')
+    // Every variant that does aim at the selected target is switched off.
+    expect(reasonFor({ variants: [variant({ enabled: false })] })).toBe('all-variants-disabled')
+    // A variant for this target that names no slide the deck has.
+    expect(reasonFor({ variants: [variant({ slideIds: [] })] })).toBe('variant-names-no-slides')
+    expect(reasonFor({ variants: [variant({ slideIds: ['gone'] })] })).toBe('variant-names-no-slides')
+    expect(reasonFor({ variants: [variant({ slideIds: undefined as never })] })).toBe('variant-names-no-slides')
+    // A deck with nothing in it at all, which outranks every variant reason.
+    expect(reasonFor({ slides: [] })).toBe('no-slides')
+    // And a plan with files in it explains nothing, because there is nothing to
+    // explain.
+    expect(reasonFor({})).toBe('none')
+  })
 })
 
 describe('export entry names', () => {
@@ -173,6 +270,44 @@ describe('variantExportRefusal', () => {
       .toBe('The “iPad” variant has no capture on slide 2, so it was not exported. Add the capture or turn that variant off.')
     expect(variantExportRefusal({ variantId: 'v', variantName: 'iPad', slideNumbers: [2, 5] }))
       .toContain('slides 2, 5')
+  })
+})
+
+describe('unassignedExportRefusal', () => {
+  const refusal = (over: Partial<ExportPlanUnassigned> = {}): string =>
+    unassignedExportRefusal({
+      reason: 'no-variant-for-profile',
+      profileId: 'google-play',
+      profileName: 'Google Play phone portrait',
+      variantId: null,
+      variantName: null,
+      ...over,
+    })
+
+  it('names the store target and the two ways out of it', () => {
+    expect(refusal()).toBe(
+      'No device variant targets “Google Play phone portrait”, so this export would write nothing. Point a variant at it, or switch the store target back to one a variant targets.',
+    )
+  })
+
+  it('tells a switched-off deck to switch a variant back on', () => {
+    const sentence = refusal({
+      reason: 'all-variants-disabled',
+      variantId: 'v',
+      variantName: 'iPhone',
+    })
+    expect(sentence).toContain('Every device variant for “Google Play phone portrait” is turned off')
+    expect(sentence).toContain('Turn one on')
+  })
+
+  it('names the variant that names no slides, rather than the deck', () => {
+    expect(refusal({ reason: 'variant-names-no-slides', variantId: 'v', variantName: 'iPhone' }))
+      .toBe('The “iPhone” variant targets “Google Play phone portrait” but names no slide in this project, so this export would write nothing. Give it the project’s slides, or turn it off.')
+  })
+
+  it('says an empty project is empty, and does not blame a variant', () => {
+    expect(refusal({ reason: 'no-slides' }))
+      .toBe('This project has no slides, so there is nothing to export. Add a slide first.')
   })
 })
 

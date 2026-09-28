@@ -2665,6 +2665,20 @@ body:has(.flowboard-shell) .app-shell {
 }
 
 /*
+ * The row's preview control.
+ *
+ * It sits in the row header next to the filename rather than in a column of its
+ * own, so the table keeps its five facts and the filename stays the first thing
+ * read. Compact, because there can be fifty-seven of them and none of them is
+ * the point of the table; the `◱` is the same glyph the variant list's "Show on
+ * canvas" uses, because it is the same destination.
+ */
+.ship-manifest__preview {
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+/*
  * The merged per-variant preview on the Refine canvas.
  *
  * The one job of this surface is to be unmistakably not the editable canvas. A

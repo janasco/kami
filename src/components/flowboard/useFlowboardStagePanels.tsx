@@ -122,6 +122,16 @@ export function useFlowboardStagePanels(
    * hook, and never serialized.
    */
   const [refineVariantPreviewId, setRefineVariantPreviewId] = useState('')
+  /**
+   * Which deck slide that preview holds, and the same two reasons plus a third.
+   *
+   * The Ship stage's export manifest is a row per planned file, and a row names
+   * a variant *and* a deck slide, so opening one is a request for both. The
+   * preview's own stepper is a request for a slide too. They write this one
+   * value, because two stores would mean a row asking for slide 7 and the
+   * stepper remembering slide 2, with the preview obliged to pick a winner.
+   */
+  const [refineVariantPreviewSlideId, setRefineVariantPreviewSlideId] = useState('')
 
   const deckInput = useMemo(() => ({
     projectName: props.projectName,
@@ -143,10 +153,14 @@ export function useFlowboardStagePanels(
   const exportGate = useMemo(() => resolveFlowboardExportGate({
     exportStatus: props.exportStatus,
     preflight,
+    // The plan's own refusal, so a store target nothing aims at reads as blocked
+    // here rather than only in the export run. The gate is what every Export
+    // control renders, so this is the one place the fact has to arrive.
+    unassigned: props.exportUnassigned,
     slideCount: slides.length,
     completed: props.exportCompleted,
     total: props.exportTotal,
-  }), [preflight, props.exportCompleted, props.exportStatus, props.exportTotal, slides.length])
+  }), [preflight, props.exportCompleted, props.exportStatus, props.exportTotal, props.exportUnassigned, slides.length])
 
   const slideIds = useMemo(() => slides.map((slide) => slide.id), [slides])
   const selection = useMemo(
@@ -204,14 +218,23 @@ export function useFlowboardStagePanels(
   const goToSlide = (slideId: string) => props.onSelect(slideId)
 
   /**
-   * The one route into the merged preview: pick the variant, then move the
-   * author to the stage that draws it. The Ship stage's "Show on canvas" button
-   * and the Refine canvas's own picker write the same state, so the two can never
-   * disagree about which variant is on screen.
+   * The one route into the merged preview: pick the variant and the deck slide,
+   * then move the author to the stage that draws it.
+   *
+   * The Ship stage's "Show on canvas" button, every row of its export manifest,
+   * and the Refine canvas's own picker all write the same two values, so there is
+   * one way in and no two surfaces that can disagree about what is on screen.
+   * `''` for the slide keeps the preview following the deck's selection, which is
+   * what it did before anything could ask for a slide by name.
    */
-  const openVariantPreview = (variantId: string, onGoToStage: (id: FlowboardStageId) => void) => {
+  const openVariantPreview = (
+    variantId: string,
+    slideId: string,
+    onGoToStage: (id: FlowboardStageId) => void,
+  ) => {
     props.onVariantPreviewChange(variantId)
     setRefineVariantPreviewId(variantId)
+    setRefineVariantPreviewSlideId(slideId)
     onGoToStage('refine')
   }
 
@@ -347,6 +370,8 @@ export function useFlowboardStagePanels(
           variants={props.variants}
           variantPreviewId={refineVariantPreviewId}
           onVariantPreviewIdChange={setRefineVariantPreviewId}
+          variantPreviewSlideId={refineVariantPreviewSlideId}
+          onVariantPreviewSlideIdChange={setRefineVariantPreviewSlideId}
           copyEditorRequest={copyEditorRequest}
         />
       )
@@ -364,6 +389,7 @@ export function useFlowboardStagePanels(
         activeVariantId={props.activeVariantId}
         onVariantPreviewChange={props.onVariantPreviewChange}
         onVariantProfileChange={props.onVariantProfileChange}
+        onVariantLocaleChange={props.onVariantLocaleChange}
         onVariantToggleEnabled={props.onVariantToggleEnabled}
         onVariantRename={props.onVariantRename}
         onVariantAdd={props.onVariantAdd}
@@ -372,13 +398,14 @@ export function useFlowboardStagePanels(
         onVariantCaptureChange={props.onVariantCaptureChange}
         exportEntries={props.exportEntries}
         exportBlockedVariant={props.exportBlockedVariant}
+        exportUnassigned={props.exportUnassigned}
         exportGate={exportGate}
         exportDetail={props.exportDetail}
         onExport={props.onExport}
         onSaveProject={props.onSaveProject}
         onOpenProject={props.onOpenProject}
         onGoToSlide={goToSlide}
-        onOpenVariantPreview={(variantId) => openVariantPreview(variantId, onGoToStage)}
+        onOpenVariantPreview={(variantId, slideId) => openVariantPreview(variantId, slideId, onGoToStage)}
         activeLocale={activeLocale}
       />
     )

@@ -16,7 +16,7 @@
 | --- | --- |
 | `$schema` | Local JSON Schema reference for editor and validation tooling. |
 | `version` | Canonical integer schema version. |
-| `revision` | Metadata for the current project revision. Git remains the history source. |
+| `revision` | Not written. An earlier version emitted `{ number: 1, createdAt: <now>, message: 'Saved from Kami editor' }`, which was never read back and made every save produce a diff. Git remains the history source. |
 | `project` | Project identity and default locale. |
 | `localization` | Locale list and text messages keyed by stable message IDs. |
 | `assets` | References to screenshots, icons, fonts, and other binary assets. |

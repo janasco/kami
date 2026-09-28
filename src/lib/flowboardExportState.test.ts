@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { runExportPreflight } from './exportPreflight'
 import { createDemoProject } from './demoProject'
+import { createDefaultOutputVariant } from './deviceVariants'
+import { planExportEntries, unassignedExportRefusal } from './exportPlan'
 import { exportProfiles, createSlide } from '../data'
 import {
   formatIssueSlideNumbers,
@@ -106,6 +108,72 @@ describe('flowboard export gate', () => {
     expect(gate({ exportStatus: 'error' }).label).toBe('Try the export again')
     expect(gate({ exportStatus: 'success' }).label).toBe('Export again')
     expect(gate({ exportStatus: 'error' }).enabled).toBe(true)
+  })
+
+  /**
+   * The input that closes the silent-empty-plan hole: a deck that passes every
+   * preflight check, and a plan with no files in it.
+   *
+   * The two are independent and either can be true alone, which is the whole
+   * reason this is a third input rather than another preflight issue code. The
+   * preflight checks the deck against the profile and finds nothing wrong; the
+   * plan finds that no variant targets the profile. Only the second one knows
+   * the export would write nothing.
+   */
+  const readyPreflightWithEmptyPlan = runExportPreflight({
+    profile,
+    slides: demoSlides,
+    activeLocale: 'en-US',
+  })
+
+  const unassignedPlan = planExportEntries({
+    slides: demoSlides,
+    variants: [createDefaultOutputVariant({
+      slideIds: demoSlides.map((slide) => slide.id),
+      locale: 'en-US',
+      themeId: 'midnight',
+      exportProfileId: 'app-store',
+    })],
+    // Every variant in the demo deck aims elsewhere, so nothing targets this.
+    profileId: 'google-play',
+    requiresScreenshot: true,
+  })
+
+  it('blocks a plan with no files in it, even though preflight passes', () => {
+    expect(readyPreflightWithEmptyPlan.status).not.toBe('blocked')
+    expect(unassignedPlan.entries).toHaveLength(0)
+    expect(unassignedPlan.blocked).toBeNull()
+    expect(unassignedPlan.unassigned?.reason).toBe('no-variant-for-profile')
+
+    const result = gate({ preflight: readyPreflightWithEmptyPlan, unassigned: unassignedPlan.unassigned })
+    expect(result.enabled).toBe(false)
+    expect(result.reason).toBe('unassigned')
+    // The flag every surface already reads, so the top bar and the guided step
+    // cannot enable a control the Ship stage has disabled.
+    expect(result.blocked).toBe(true)
+    expect(result.message).toBe(unassignedExportRefusal(unassignedPlan.unassigned!))
+  })
+
+  it('prefers a blocking preflight issue over an empty plan, so the first fix is named', () => {
+    const result = gate({ preflight: blockedPreflight, unassigned: unassignedPlan.unassigned, slideCount: 1 })
+    expect(result.reason).toBe('blocked')
+    expect(result.enabled).toBe(false)
+  })
+
+  it('keeps the ready gate unchanged when the plan has files in it', () => {
+    const plan = planExportEntries({
+      slides: demoSlides,
+      variants: [createDefaultOutputVariant({
+        slideIds: demoSlides.map((slide) => slide.id),
+        locale: 'en-US',
+        themeId: 'midnight',
+        exportProfileId: profile.id,
+      })],
+      profileId: profile.id,
+      requiresScreenshot: true,
+    })
+    expect(plan.unassigned).toBeNull()
+    expect(gate({ unassigned: plan.unassigned }).reason).toBe('ready')
   })
 
   it('formats issue slide numbers the way the Ship stage reads them out', () => {

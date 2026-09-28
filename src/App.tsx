@@ -18,13 +18,13 @@ import {
   serializeProject,
 } from './lib/project'
 import { exportSlidesAsZip } from './lib/exportSlides'
-import { planExportEntries, variantExportRefusal } from './lib/exportPlan'
+import { planExportEntries, unassignedExportRefusal, variantExportRefusal } from './lib/exportPlan'
 import {
   collectExportPreflightBounds,
   runExportPreflight,
   type PreflightLayerBoundsBySlide,
 } from './lib/exportPreflight'
-import { createDefaultOutputVariant, enabledVariantsForProfile, expandVariantRenders } from './lib/deviceVariants'
+import { createDefaultOutputVariant, enabledVariantsForProfile, expandVariantRenders, reconcileVariantSlideIds } from './lib/deviceVariants'
 import { createSlidesFromProjectTemplate, type ProjectTemplate } from './lib/projectTemplates'
 import { createDemoProject } from './lib/demoProject'
 import { applyBulkSlideAction, bulkActionMergeKey, describeBulkSlideResult, type BulkSlideAction } from './lib/flowboardBulkEdit'
@@ -135,6 +135,23 @@ function App() {
   const [exportTotal, setExportTotal] = useState(0)
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
   const [screenshotImportOpen, setScreenshotImportOpen] = useState(false)
+  /**
+   * Counts how many times a deck has been created, so the editor shell can open
+   * on the stage where the work actually happens.
+   *
+   * A counter rather than a boolean on purpose. A deck can be replaced several
+   * times in one session — a template, then the demo, then a blank slide — and
+   * each one should open the editor again. A boolean would only ever fire for
+   * the first, and the second template would leave the author on Intake looking
+   * at a deck they cannot see.
+   *
+   * It is a count and not the deck itself because `activeStage` belongs to the
+   * Flowboard shell while every action that creates a deck lives up here, above
+   * it. A count is the one signal that crosses that boundary without either side
+   * having to own the other's state. Zero means "nothing has been created yet",
+   * so the effect that reads it does not fire on first mount.
+   */
+  const [editorEntryRequest, setEditorEntryRequest] = useState(0)
   const [onboardingCompleted, setOnboardingCompleted] = useState(hasCompletedOnboarding)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [editorView, setEditorView] = useState<EditorView>('flowboard')
@@ -209,6 +226,15 @@ function App() {
   }), [exportProfile.id, exportProfile.preflight, slides, variants])
 
   /**
+   * The first enabled variant for the current profile, which is the one device
+   * set the measurement pass reads.
+   */
+  const measuredVariant = useMemo(
+    () => enabledVariantsForProfile(variants, exportProfile.id)[0],
+    [exportProfile.id, variants],
+  )
+
+  /**
    * Which slide each export node belongs to, for the measurement pass.
    *
    * The stage lays out one node per planned entry, so the first `slides.length`
@@ -217,10 +243,43 @@ function App() {
    * align, distribute, and preflight-bounds paths have always used.
    */
   const measuredSlideIds = useMemo(() => {
-    const first = enabledVariantsForProfile(variants, exportProfile.id)[0]
-    if (!first) return slides.map((slide) => slide.id)
-    return expandVariantRenders(slides, first).map((render) => render.slide.id)
-  }, [exportProfile.id, slides, variants])
+    if (!measuredVariant) return slides.map((slide) => slide.id)
+    return expandVariantRenders(slides, measuredVariant).map((render) => render.slide.id)
+  }, [measuredVariant, slides])
+
+  /**
+   * Whether an export is actually running, as opposed to merely possible.
+   *
+   * `validation` and `exporting` are the two states where every planned node must
+   * be in the DOM. `success` and `error` are outcomes and `idle` is the resting
+   * state, and none of the three needs a rendered export stage.
+   */
+  const exportInFlight = exportStatus === 'validation' || exportStatus === 'exporting'
+
+  /**
+   * The entries the off-screen export stage should hold right now.
+   *
+   * The stage used to hold every entry of every variant, permanently. Measured on
+   * a nineteen-slide deck with three variants: 2,736 of the document's 4,249
+   * elements were that one hidden container, and typing ten characters into a
+   * variant name cost 905ms — about 90ms per keystroke, five times the frame
+   * budget, for typing into a text field.
+   *
+   * While idle it holds only the measured variant's entries, and that is
+   * measurement-identical rather than merely plausible:
+   * `collectExportPreflightBounds` takes `slideNodes.slice(0, slideIds.length)` and
+   * pairs those nodes with `measuredSlideIds` **by position**. The plan is
+   * variant-major, so the first N mounted nodes are the measured variant's slides
+   * whichever entries are mounted. Once the full list is mounted for the export
+   * itself, the same positional pairing holds.
+   *
+   * For the common single-variant deck this changes nothing at all, because the
+   * measured variant is the only one.
+   */
+  const mountedExportEntries = useMemo(() => {
+    if (exportInFlight || !measuredVariant) return exportPlan.entries
+    return exportPlan.entries.filter((entry) => entry.variantId === measuredVariant.id)
+  }, [exportInFlight, exportPlan.entries, measuredVariant])
 
   useLayoutEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -270,7 +329,30 @@ function App() {
     mergeKey?: string,
   ) => {
     const current = editorRef.current
-    const next = update(current)
+    const updated = update(current)
+    if (updated === current) return
+
+    /*
+     * Every variant is re-pointed at the deck whenever the deck's shape changes.
+     *
+     * This is here, in the one function every deck edit funnels through, rather
+     * than in the twelve call sites that change `slides`. Patching each one is
+     * how the bug arrived: `addSlide` updated `slides` and nothing else, so a new
+     * slide joined no variant and the export plan silently omitted it — ten slides
+     * and three variants produced three manifest rows.
+     *
+     * Running only when the slide list actually changed keeps a deck that is never
+     * edited byte-identical, which is the property the whole document format rests
+     * on. `reconcileVariantSlideIds` returns the same array when nothing moved, so
+     * an edit that touches slides but not variants does not also rewrite them.
+     */
+    const next = updated.slides === current.slides
+      ? updated
+      : (() => {
+          const reconciled = reconcileVariantSlideIds(updated.slides, updated.outputVariants)
+          return reconciled === updated.outputVariants ? updated : { ...updated, outputVariants: reconciled }
+        })()
+
     if (next === current) return
 
     const contentChanged = next.projectName !== current.projectName
@@ -367,6 +449,36 @@ function App() {
         }
         const initialProject = loadResult.project
         if (initialProject) {
+          /*
+           * The draft's variants are re-pointed at the draft's deck on the way in.
+           *
+           * `commitEditorUpdate` does this for every edit, and this is the one
+           * ingress that is not an edit: `replaceEditor` installs the restored
+           * state directly, so nothing reconciles it. That left the worst version
+           * of the stale-reference bug in the app, because the draft is where a
+           * stale reference actually comes from — a document written before
+           * variants covered the deck restores with each variant naming only the
+           * slides it was created with, and `restoreOutputVariants` filters to
+           * existing slides rather than adding missing ones, so nothing downstream
+           * repairs it either.
+           *
+           * A three-slide deck with two variants naming one slide each then
+           * planned 2 PNGs instead of 6, and the Ship review said "nothing blocks
+           * the export" beside it, because a plan that renders what the variants
+           * name is faithful about a plan that renders the wrong slides. Opening
+           * the very same document from a file *was* reconciled, via
+           * `commitEditorUpdate`; this is the path that made the same document
+           * behave two different ways.
+           *
+           * The same call, not a second rule: `reconcileVariantSlideIds` returns
+           * the same array when the draft already agrees, so a current draft is
+           * installed — and autosaved — untouched, which is the byte-identity
+           * property the format rests on.
+           */
+          const restoredVariants = reconcileVariantSlideIds(
+            initialProject.slides,
+            initialProject.outputVariants,
+          )
           replaceEditor({
             projectName: initialProject.name,
             slides: initialProject.slides,
@@ -374,7 +486,7 @@ function App() {
             activeLocale: initialProject.activeLocale,
             canvasMode: initialProject.canvasMode,
             exportProfileId: initialProject.selectedExportProfileId,
-            ...(initialProject.outputVariants ? { outputVariants: initialProject.outputVariants } : {}),
+            ...(restoredVariants ? { outputVariants: restoredVariants } : {}),
           })
         }
         clearEditorHistory()
@@ -632,6 +744,7 @@ function App() {
     }))
     setSelectedLayerId('headline')
     closeOnboarding()
+    setEditorEntryRequest((count) => count + 1)
   }
 
   const startFromTemplate = () => {
@@ -660,6 +773,7 @@ function App() {
     setTemplatePickerOpen(false)
     setProjectValidationNotice('Generated demo loaded with three safe, inline SVG screenshots. Undo is available.')
     closeOnboarding()
+    setEditorEntryRequest((count) => count + 1)
   }
 
   const startFromOpenProject = () => {
@@ -686,6 +800,7 @@ function App() {
     setSelectedLayerId('headline')
     setTemplatePickerOpen(false)
     setProjectValidationNotice(`${template.name} applied. Undo is available if you want to return to the previous deck.`)
+    setEditorEntryRequest((count) => count + 1)
   }
 
   const addSlide = () => {
@@ -1249,6 +1364,19 @@ function App() {
       setExportDetail(variantExportRefusal(plan.blocked))
       return
     }
+    /*
+     * The second refusal, and the one the gate cannot reach on its own.
+     *
+     * `plan.blocked` speaks about a variant; this one has no variant to name,
+     * because the plan is empty. Reaching here would mean writing an empty ZIP
+     * and reporting it as a success, so the run stops before anything is
+     * rendered, exactly as it does for a blocked variant.
+     */
+    if (plan.unassigned) {
+      setExportStatus('validation')
+      setExportDetail(unassignedExportRefusal(plan.unassigned))
+      return
+    }
 
     exportInProgressRef.current = true
     setExportStatus('exporting')
@@ -1258,6 +1386,35 @@ function App() {
 
     try {
       if (!exportStageRef.current) throw new Error('The export canvas is not ready.')
+
+      /*
+       * Wait for the full stage to actually mount before reading it.
+       *
+       * `setExportStatus('exporting')` above only schedules a render; React has not
+       * committed it by the time this line runs, and the stage now mounts every
+       * entry only while an export is in flight. Reading the ref immediately would
+       * therefore hand `exportSlidesAsZip` whatever was still mounted — on a
+       * multi-language deck, one language's slides — and produce a ZIP that was
+       * short and reported success.
+       *
+       * Polling for the node count rather than waiting a fixed frame is deliberate:
+       * one `requestAnimationFrame` is not a guarantee, and a wrong answer here is
+       * a silently incomplete bundle. The check below turns "not ready yet" into a
+       * loud failure instead.
+       */
+      const expectedNodes = plan.entries.length
+      const deadline = Date.now() + 3000
+      let mountedNodes = exportStageRef.current.querySelectorAll('[data-export-slide]').length
+      while (mountedNodes < expectedNodes && Date.now() < deadline) {
+        await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)))
+        mountedNodes = exportStageRef.current?.querySelectorAll('[data-export-slide]').length ?? 0
+      }
+      if (mountedNodes < expectedNodes) {
+        throw new Error(
+          `The export canvas mounted ${mountedNodes} of ${expectedNodes} slides, so the bundle would have been incomplete. Nothing was downloaded.`,
+        )
+      }
+
       const { archive, filename } = await exportSlidesAsZip({
         projectName,
         entries: plan.entries,
@@ -1308,6 +1465,28 @@ function App() {
 
   const toggleVariantEnabled = (variantId: string) => {
     updateOutputVariants(variants.map((variant) => (variant.id === variantId ? { ...variant, enabled: !variant.enabled } : variant)))
+  }
+
+  /**
+   * Set the language one variant is drawn in.
+   *
+   * `locale` has been on the variant since the field was introduced: it is
+   * persisted, it is validated, it decides what the PNGs are drawn in, and it is
+   * what the filename records. What it had no *control* for, so a new variant
+   * inherited the deck's active locale and stayed there — which meant a deck
+   * could describe several devices but only ever one language, no matter what the
+   * document said.
+   *
+   * Deliberately one field on one variant rather than a bulk "translate to…"
+   * action. Copy is authored per locale in the Story translation matrix, and a
+   * variant pointing at a language whose copy is missing falls back to English
+   * per field — which is a real, inspectable state, whereas a bulk duplicate
+   * would fill the set with variants that silently export English twice.
+   */
+  const changeVariantLocale = (variantId: string, locale: LocaleId) => {
+    updateOutputVariants(
+      variants.map((variant) => (variant.id === variantId ? { ...variant, locale } : variant)),
+    )
   }
 
   const renameVariant = (variantId: string, name: string) => {
@@ -1475,6 +1654,7 @@ function App() {
     onApplyTemplate: applyProjectTemplate,
     onLoadDemo: loadDemoProject,
     onStartBlank: startBlankSlide,
+    editorEntryRequest,
     onOpenGuide: () => setOnboardingOpen(true),
     activeLocale,
     onLocaleChange: changeActiveLocale,
@@ -1487,8 +1667,10 @@ function App() {
     activeVariantId: previewVariant?.id ?? '',
     exportEntries: exportPlan.entries,
     exportBlockedVariant: exportPlan.blocked,
+    exportUnassigned: exportPlan.unassigned,
     onVariantPreviewChange: setPreviewVariantId,
     onVariantProfileChange: changeVariantProfile,
+    onVariantLocaleChange: changeVariantLocale,
     onVariantToggleEnabled: toggleVariantEnabled,
     onVariantRename: renameVariant,
     onVariantAdd: addOutputVariant,
@@ -1666,7 +1848,7 @@ function App() {
         }}
         aria-label="Open screenshot studio project"
       />
-      <ExportSlides entries={exportPlan.entries} variants={variants} profile={exportProfile} locale={activeLocale} stageRef={exportStageRef} />
+      <ExportSlides entries={mountedExportEntries} variants={variants} profile={exportProfile} locale={activeLocale} stageRef={exportStageRef} />
       {onboardingOpen && (
         <OnboardingGuide
           onClose={closeOnboarding}

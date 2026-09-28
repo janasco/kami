@@ -38,11 +38,14 @@ const variant = (overrides: Partial<OutputVariant> = {}): OutputVariant => ({
 const deck = (ids: string[] = ['slide-1', 'slide-2']): Slide[] =>
   ids.map((id, index) => createTestSlide({ id, title: `Slide ${index + 1}` }))
 
-/** The serialized bytes with the wall-clock stamp neutralised. */
-const serializeBytes = (project: EditorProject) => {
-  const document = serializeProject(project) as unknown as Record<string, unknown>
-  return JSON.stringify({ ...document, revision: { ...(document.revision as object), createdAt: '' } })
-}
+/**
+ * The serialized bytes, verbatim.
+ *
+ * This used to blank `revision.createdAt`, which was the document's one
+ * wall-clock field. It is gone, so the whole document has to match byte for byte
+ * now, with no carve-out to reintroduce a volatile field into.
+ */
+const serializeBytes = (project: EditorProject) => JSON.stringify(serializeProject(project))
 
 const variantsOf = (document: object) =>
   (document as { outputVariants?: unknown }).outputVariants as Array<Record<string, unknown>>

@@ -50,16 +50,15 @@ const withBackgroundLayer = (document: Record<string, unknown>, index: number, e
 }
 
 /**
- * The serialized bytes, with the save timestamp neutralised.
+ * The serialized bytes, verbatim.
  *
- * `revision.createdAt` is the one part of the document that is not a function of
- * the project, and it has always been a wall-clock stamp. Everything else has to
- * match byte for byte.
+ * This used to neutralise `revision.createdAt` before comparing, because that
+ * field was a wall-clock stamp and the rest of the document had to match byte for
+ * byte around it. The field is gone, so the comparison is now the whole document
+ * and the workaround with it — which is the better test, because a field that
+ * changes on every save could previously have been reintroduced here unnoticed.
  */
-const serializeBytes = (project: EditorProject) => {
-  const document = serializeProject(project)
-  return JSON.stringify({ ...document, revision: { ...document.revision, createdAt: '' } })
-}
+const serializeBytes = (project: EditorProject) => JSON.stringify(serializeProject(project))
 
 const backgroundSlide = (overrides: Partial<Slide> = {}): Slide => createTestSlide({
   backgroundImage: { name: 'backdrop.png', dataUrl: VALID_PNG_DATA_URL, mimeType: 'image/png', width: 3000, height: 1000 },

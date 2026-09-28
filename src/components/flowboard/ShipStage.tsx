@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
-import { deviceFramePresets, exportProfiles, screenshotFitOptions } from '../../data'
+import { deviceFramePresets, exportProfiles, localeOptions, screenshotFitOptions } from '../../data'
 import { describeDeviceVariant, expandVariantRenders, findDeviceOverride } from '../../lib/deviceVariants'
 import { formatPreflightIssueLocation, type ExportPreflightResult } from '../../lib/exportPreflight'
-import { type ExportEntry, type ExportPlan } from '../../lib/exportPlan'
-import { variantExportRefusal } from '../../lib/exportPlan'
+import { type ExportEntry, type ExportPlan, type ExportPlanFiles } from '../../lib/exportPlan'
+import { unassignedExportRefusal, variantExportRefusal } from '../../lib/exportPlan'
 import { buildExportManifest, type ExportManifest } from '../../lib/exportManifest'
 import { buildStorePreview, type StorePreview as StorePreviewModel } from '../../lib/storePreview'
 import type { FlowboardExportGate } from '../../lib/flowboardExportState'
@@ -21,6 +21,15 @@ export interface ShipStageProps {
   activeVariantId: string
   onVariantPreviewChange: (variantId: string) => void
   onVariantProfileChange: (variantId: string, profileId: ExportProfileId) => void
+  /**
+   * Set the language a variant is drawn in.
+   *
+   * This is the control that makes a multi-language set authorable at all. Until
+   * it existed, a new variant inherited the deck's active locale and nothing could
+   * change it afterwards, so a deck could only ever be exported in one language —
+   * the field was in the document and unreachable from the editor.
+   */
+  onVariantLocaleChange: (variantId: string, locale: LocaleId) => void
   onVariantToggleEnabled: (variantId: string) => void
   onVariantRename: (variantId: string, name: string) => void
   onVariantAdd: () => void
@@ -39,6 +48,15 @@ export interface ShipStageProps {
   exportEntries: ExportEntry[]
   exportBlockedVariant: ExportPlan['blocked']
   /**
+   * Why the plan has no files in it, when it has none.
+   *
+   * Distinct from `exportBlockedVariant` because there is no variant to point at:
+   * the plan is empty, so nothing is named. The sentence still names the store
+   * target, which is the control the author has to change. Optional, so a caller
+   * that knows nothing about the plan renders the stage it had.
+   */
+  exportUnassigned?: ExportPlan['unassigned']
+  /**
    * The shared export gate. The top bar reads the same value, so the two Export
    * controls can never enable or block independently.
    */
@@ -49,12 +67,13 @@ export interface ShipStageProps {
   onOpenProject: () => void
   onGoToSlide: (slideId: string) => void
   /**
-   * Sends the Refine canvas to one variant's merged preview. The one way into
-   * that surface from here, so a variant an author has just configured is one
-   * keystroke from being looked at. Optional, because a caller with nowhere to
-   * send the author simply has no such button.
+   * Sends the Refine canvas to one variant's merged preview, at one deck slide.
+   * The one way into that surface from here: the per-variant "Show on canvas"
+   * control and every manifest row call this and nothing else, so a row can never
+   * land the author somewhere the variant list would not have. Optional, because
+   * a caller with nowhere to send the author simply has no such button.
    */
-  onOpenVariantPreview?: (variantId: string) => void
+  onOpenVariantPreview?: (variantId: string, slideId: string) => void
   /** The editor's active locale, for the headline the store preview reports on. */
   activeLocale?: LocaleId
 }
@@ -85,6 +104,7 @@ export function ShipStage({
   activeVariantId,
   onVariantPreviewChange,
   onVariantProfileChange,
+  onVariantLocaleChange,
   onVariantToggleEnabled,
   onVariantRename,
   onVariantAdd,
@@ -93,6 +113,7 @@ export function ShipStage({
   onVariantCaptureChange,
   exportEntries,
   exportBlockedVariant,
+  exportUnassigned = null,
   exportGate,
   exportDetail,
   onExport,
@@ -115,7 +136,7 @@ export function ShipStage({
    * stored: the manifest is a question asked of the plan, and a plan saved
    * yesterday cannot disagree with the export running today.
    */
-  const plan: ExportPlan = useMemo(
+  const plan: ExportPlanFiles = useMemo(
     () => ({ entries: exportEntries, blocked: exportBlockedVariant }),
     [exportBlockedVariant, exportEntries],
   )
@@ -169,14 +190,24 @@ export function ShipStage({
               <small>{captureCount} of {slides.length} slides have a capture · {iconCount} show an app icon</small>
             </div>
           </li>
-          <li className={exportBlockedVariant ? 'is-blocked' : 'is-done'}>
-            <span className="flowboard-review__mark" aria-hidden="true">{exportBlockedVariant ? '!' : '✓'}</span>
+          {/*
+            Both refusals mark this row, and the plan's own is checked first
+            because it is the more fundamental one: with no files planned, the
+            count below would read "0 PNGs planned" as though zero were a normal
+            outcome of a deck the author had just finished. There is no variant
+            to mark here, so the sentence is the store target and what to do
+            about it.
+          */}
+          <li className={exportBlockedVariant || exportUnassigned ? 'is-blocked' : 'is-done'}>
+            <span className="flowboard-review__mark" aria-hidden="true">{exportBlockedVariant || exportUnassigned ? '!' : '✓'}</span>
             <div className="flowboard-review__copy">
               <strong>Device variants</strong>
               <small>
-                {variants.length === 1
-                  ? 'One device set. Add a variant to export a second device from the same deck.'
-                  : `${enabledCount} of ${variants.length} variant${variants.length === 1 ? '' : 's'} enabled · ${exportEntries.length} PNG${exportEntries.length === 1 ? '' : 's'} planned.`}
+                {exportUnassigned
+                  ? unassignedExportRefusal(exportUnassigned)
+                  : variants.length === 1
+                    ? 'One device set. Add a variant to export a second device from the same deck.'
+                    : `${enabledCount} of ${variants.length} variant${variants.length === 1 ? '' : 's'} enabled · ${exportEntries.length} PNG${exportEntries.length === 1 ? '' : 's'} planned.`}
               </small>
             </div>
           </li>
@@ -306,6 +337,26 @@ export function ShipStage({
                         ))}
                       </select>
                     </div>
+                    <div className="flowboard-export-grid__form">
+                      <label className="field-label" htmlFor={`variant-locale-${variant.id}`}>Language</label>
+                      <select
+                        id={`variant-locale-${variant.id}`}
+                        className="profile-select"
+                        value={variant.locale}
+                        onChange={(event) => onVariantLocaleChange(variant.id, event.target.value as LocaleId)}
+                      >
+                        {localeOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                            {option.direction === 'rtl' ? ' · right to left' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="flowboard-hint">
+                        The language every PNG in this variant is drawn in. It is what the
+                        filename records and what the store listing shows.
+                      </p>
+                    </div>
                     <div className="ship-variant__slides">
                       {renders.map((render) => {
                         const override = findDeviceOverride(variant, render.slide.id)
@@ -378,7 +429,7 @@ export function ShipStage({
                         <button
                           className="button button--quiet button--small"
                           type="button"
-                          onClick={() => onOpenVariantPreview(variant.id)}
+                          onClick={() => onOpenVariantPreview(variant.id, selectedSlide.id)}
                           disabled={!variant.slideIds.includes(selectedSlide.id)}
                           title={variant.slideIds.includes(selectedSlide.id)
                             ? 'Show this variant’s export for the selected slide on the Refine canvas'
@@ -422,6 +473,14 @@ export function ShipStage({
           written at, and the locale is the locale each PNG is drawn in. Derived
           rather than stored, so there is nothing to go stale and nothing to
           migrate.
+
+          Every row is also a way to look at the file it names, because a table of
+          fifty-seven rows with no link out of it is a table an author can only
+          read. The control is a real `<button>` inside the row's own header cell —
+          not a click handler on the `<tr>`, which a keyboard could never reach —
+          and it calls the very same `onOpenVariantPreview` the variant list above
+          uses, so there is one route into the merged preview and not two that can
+          disagree about where they land.
         */}
         {manifest.entries.length > 0 && (
           <div className="ship-variant__bundle">
@@ -446,7 +505,28 @@ export function ShipStage({
                 <tbody>
                   {manifest.entries.map((entry) => (
                     <tr key={`${entry.variantId}-${entry.slideId}`}>
-                      <th scope="row"><code>{entry.filename}</code></th>
+                      <th scope="row">
+                        <code>{entry.filename}</code>
+                        {/*
+                          The button carries the filename's row, so it lives in the
+                          row's header cell: a sixth column would be a data cell
+                          with no header of its own, and a handler on the `<tr>`
+                          would be invisible to the keyboard. The name has to say
+                          which variant and which slide, because "Preview" fifty-
+                          seven times over is not a name.
+                        */}
+                        {onOpenVariantPreview && (
+                          <button
+                            className="button button--quiet button--small ship-manifest__preview"
+                            type="button"
+                            aria-label={`Preview ${entry.variantName}, deck slide ${entry.slideNumber}`}
+                            title={`Show how ${entry.filename} will be drawn on the Refine canvas. Read-only: nothing is exported and the deck does not change.`}
+                            onClick={() => onOpenVariantPreview(entry.variantId, entry.slideId)}
+                          >
+                            <span aria-hidden="true">◱</span> Preview
+                          </button>
+                        )}
+                      </th>
                       <td>{entry.variantName}</td>
                       <td>{entry.slideNumber}</td>
                       <td>{entry.dimensions}</td>

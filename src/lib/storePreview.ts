@@ -19,7 +19,7 @@
 
 import { getStoreListing, type StoreListing } from '../data'
 import { exportEntryLocale } from './exportManifest'
-import { exportEntryName, type ExportPlan } from './exportPlan'
+import { exportEntryName, type ExportPlanFiles } from './exportPlan'
 import { getSlideText } from './localization'
 import { summarizeCapture } from './flowboardStages'
 import type { ExportProfile, LocaleId, OutputVariant, Slide } from '../types'
@@ -75,7 +75,8 @@ export interface StorePreview {
 }
 
 export interface BuildStorePreviewInput {
-  plan: ExportPlan
+  /** The files and the block. See `BuildExportManifestInput.plan` for why. */
+  plan: ExportPlanFiles
   profile: ExportProfile
   /**
    * The deck's variants, in document order. Read for one thing only: the locale
@@ -95,7 +96,7 @@ export interface BuildStorePreviewInput {
 }
 
 /** The first variant the plan writes, in plan order. */
-const firstPlannedVariantId = (entries: ExportPlan['entries']): string => {
+const firstPlannedVariantId = (entries: ExportPlanFiles['entries']): string => {
   for (const entry of entries) return entry.variantId
   return ''
 }

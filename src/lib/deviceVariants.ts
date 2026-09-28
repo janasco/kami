@@ -201,6 +201,75 @@ export const expandVariantRenders = (
   return renders
 }
 
+/**
+ * Brings every variant's `slideIds` back in step with the deck it renders.
+ *
+ * The bug this exists to prevent
+ * -----------------------------
+ * `slideIds` is a reference set, which is the right design: copying slides per
+ * device would inflate `slides` and break every 1-based position that preflight,
+ * the ZIP numbering, and the "open this slide" affordances read. But a reference
+ * set is only useful while it is *current*, and nothing maintained it. Creating a
+ * variant snapshotted the deck's ids; adding a slide afterwards updated `slides`
+ * and nothing else, so the new slide joined no variant and the export plan — which
+ * faithfully renders what the variants name — silently omitted it.
+ *
+ * Measured on a ten-slide deck with three variants: three manifest rows instead of
+ * thirty, no warning, and a manifest that looked complete because it only listed
+ * the three files it was going to write.
+ *
+ * The rule
+ * --------
+ * A variant covers the whole deck, so after a reconcile its `slideIds` is the
+ * deck's id list in deck order. That single statement covers both broken halves:
+ *
+ *  - A slide the deck gained is added, so it stops being silently omitted from
+ *    every variant's export. A slide a variant has no override for renders
+ *    exactly as the deck renders it, so including it costs nothing and changes no
+ *    pixels.
+ *  - An id the deck no longer has is dropped. A dangling id is not a subset, it is
+ *    a reference to something absent, and the document validator rejects it — so a
+ *    deleted slide would otherwise turn a valid project into an invalid one.
+ *
+ * Deck order is not negotiable: every 1-based number in the product is a deck
+ * position, and `expandVariantRenders` reports a variant's slides by their real
+ * deck positions.
+ *
+ * Why full coverage rather than opt-in: there is no control anywhere in the
+ * editor that narrows a variant to a subset of slides, so a subset is not
+ * authorable. Opting in per slide would leave the common case — add a slide,
+ * export, quietly miss it — as the default. If a subset is ever wanted it should
+ * be an explicit control, not the absence of an update.
+ *
+ * Returns the same array reference when nothing needed changing, so a caller can
+ * use identity to skip a commit. That is what keeps an unedited deck byte
+ * identical, and what stops every keystroke in a name field rewriting every
+ * variant.
+ */
+export const reconcileVariantSlideIds = (
+  slides: readonly Slide[],
+  variants: OutputVariant[] | undefined,
+): OutputVariant[] | undefined => {
+  if (!variants || variants.length === 0) return variants
+
+  const deckIds = slides.map((slide) => slide.id)
+  const alreadyCurrent = (variant: OutputVariant) => {
+    const ids = Array.isArray(variant.slideIds) ? variant.slideIds : []
+    return ids.length === deckIds.length && ids.every((id, index) => id === deckIds[index])
+  }
+
+  if (variants.every(alreadyCurrent)) return variants
+  return variants.map((variant) => (
+    // `deckIds` is copied per variant, never shared between them. A variant is a
+    // reference set of *slides* — that is the point, and duplicating the slides
+    // would break every 1-based deck position — but the id list itself is an
+    // ordinary mutable array, and handing the same instance to every variant
+    // would let a later in-place edit to one reach silently into the others.
+    // `createDefaultOutputVariant` copies for the same reason.
+    alreadyCurrent(variant) ? variant : { ...variant, slideIds: [...deckIds] }
+  ))
+}
+
 /** The enabled variants that target one profile, in document order. */
 export const enabledVariantsForProfile = (
   variants: readonly OutputVariant[],

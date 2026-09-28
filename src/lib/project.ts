@@ -50,14 +50,18 @@ interface ProjectAsset {
   height?: number
 }
 
-interface ProjectFile {
+/**
+ * The serialized document, as written to disk.
+ *
+ * Exported because the gate's round-trip check formats a value of this shape and
+ * must be typed against the same declaration the serializer returns. It was
+ * module-private for a long time, and `scripts/gate/roundtrip.ts` imported a
+ * `ProjectFile` from `src/types` that never existed — a type error that survived
+ * only because nothing typechecked `scripts/`.
+ */
+export interface ProjectFile {
   $schema: string
   version: typeof PROJECT_VERSION
-  revision: {
-    number: number
-    createdAt: string
-    message: string
-  }
   project: {
     id: string
     name: string
@@ -455,11 +459,28 @@ export function serializeProject(project: EditorProject): ProjectFile {
   return {
     $schema: './schemas/screenshot-studio.v1.json',
     version: PROJECT_VERSION,
-    revision: {
-      number: 1,
-      createdAt: new Date().toISOString(),
-      message: 'Saved from Kami editor',
-    },
+    /*
+     * There is deliberately no `revision` block.
+     *
+     * It used to be written here as `{ number: 1, createdAt: new Date(), message:
+     * 'Saved from Kami editor' }` — a hardcoded number, a fresh clock reading, and
+     * a fixed string, none of it read back from the incoming document or ever read
+     * by anything. `EditorProject` has no `revision` field, so the value was
+     * destroyed on load and re-fabricated on save.
+     *
+     * The cost was real and specific: the file's loudest diff was the one line
+     * carrying no information. For a document whose whole pitch is that it lives
+     * in Git alongside your code, opening the app and saving with no edits
+     * produced a two-line diff every time, so a user could not tell a real change
+     * from a no-op save. It was also already costing the suite workarounds — two
+     * persistence tests had to blank `createdAt` before comparing documents.
+     *
+     * The schema keeps `$defs.revision` so the vocabulary is not lost if a real
+     * history is ever wanted, but nothing writes it. If it is reintroduced it
+     * should be derived from the content — a content hash, a count of real
+     * changes — and never from a clock, because a clock makes the document
+     * unstable for the one tool that is supposed to be tracking its changes.
+     */
     project: {
       id: 'project-main',
       name: project.name,

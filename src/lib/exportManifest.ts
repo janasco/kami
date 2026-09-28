@@ -23,7 +23,7 @@
  * No React and no DOM, so the whole thing is reachable from a test.
  */
 
-import { exportEntryName, type ExportEntry, type ExportPlan } from './exportPlan'
+import { exportEntryName, type ExportEntry, type ExportPlanFiles } from './exportPlan'
 import type { ExportProfile, LocaleId, OutputVariant } from '../types'
 
 /** One file the export will write, described the way a person reads it. */
@@ -63,11 +63,19 @@ export interface ExportManifest {
   editorLocale: LocaleId
   entries: ExportManifestEntry[]
   /** The refusal a blocked variant produces, carried so a surface can state it. */
-  blocked: ExportPlan['blocked']
+  blocked: ExportPlanFiles['blocked']
 }
 
 export interface BuildExportManifestInput {
-  plan: ExportPlan
+  /**
+   * The files and the block, not the whole plan.
+   *
+   * The manifest answers "which files", and no files is a legitimate answer for
+   * it — a manifest of nothing is a manifest. Whether the plan can explain its
+   * own emptiness is the export's question, and it is answered before the export
+   * runs, so a surface that wants that answer reads it off the plan directly.
+   */
+  plan: ExportPlanFiles
   profile: ExportProfile
   /**
    * The deck's variants, in document order. Only the locale is read from them;

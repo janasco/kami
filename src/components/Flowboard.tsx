@@ -107,6 +107,16 @@ export interface FlowboardProps {
   onApplyTemplate: (template: ProjectTemplate, mode: TemplateApplyMode) => void
   onLoadDemo: () => void
   onStartBlank: () => void
+  /**
+   * How many times a deck has been created upstream. The shell watches this to
+   * open on the editor stage, so choosing a template lands the author on the
+   * slide they just built rather than back on the stage they started from.
+   *
+   * A count, not a boolean: a deck can be replaced several times in a session
+   * and every one of them should open the editor. Zero means none, so the
+   * effect does not fire on mount.
+   */
+  editorEntryRequest?: number
   onOpenGuide: () => void
   activeLocale: LocaleId
   onLocaleChange: (locale: LocaleId) => void
@@ -127,8 +137,20 @@ export interface FlowboardProps {
   exportEntries: ExportEntry[]
   /** The variant that refuses to export, when one does. */
   exportBlockedVariant: ExportPlan['blocked']
+  /**
+   * Why the plan has no files in it, when it has none.
+   *
+   * A separate field from `exportBlockedVariant` because the two answer different
+   * questions and come from different places: a block names a variant and the
+   * deck positions that stop it, while this names a store target and why nothing
+   * aims at it. Optional and additive — a caller that knows nothing about the
+   * plan omits it and gets the shell it had.
+   */
+  exportUnassigned?: ExportPlan['unassigned']
   onVariantPreviewChange: (variantId: string) => void
   onVariantProfileChange: (variantId: string, profileId: ExportProfileId) => void
+  /** Set the language a variant is drawn in. */
+  onVariantLocaleChange: (variantId: string, locale: LocaleId) => void
   onVariantToggleEnabled: (variantId: string) => void
   onVariantRename: (variantId: string, name: string) => void
   onVariantAdd: () => void
@@ -185,6 +207,7 @@ export function Flowboard(props: FlowboardProps) {
     slides,
     preflight,
     profile,
+    editorEntryRequest = 0,
   } = props
   const breakpoint = useFlowboardBreakpoint()
   const [activeStage, setActiveStage] = useState<FlowboardStageId>('intake')
@@ -199,6 +222,25 @@ export function Flowboard(props: FlowboardProps) {
     setActiveStage('refine')
     setRailOpen(false)
   }, [])
+
+  /**
+   * Creating a deck opens the editor.
+   *
+   * Every way of making a deck — a template, the demo, one blank slide — ends
+   * with the author looking at the Intake stage, which is a checklist and a
+   * dropzone rather than the thing they came to use. Refine is the stage that
+   * holds the canvas and the inspector, so it is where the deck is actually
+   * worked on and where it should open.
+   *
+   * The guard on zero matters: this effect must not fire when the shell mounts,
+   * or every existing project would jump to Refine on load and skip the Intake
+   * checklist that tells an author what is still missing.
+   */
+  useEffect(() => {
+    if (!editorEntryRequest) return
+    setActiveStage('refine')
+    setRailOpen(false)
+  }, [editorEntryRequest])
   const {
     stages,
     checklist,

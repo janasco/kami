@@ -529,11 +529,13 @@ body:has(.guided-shell) .app-shell {
   line-height: var(--leading-normal);
 }
 
-.guided-gate--blocked {
+.guided-gate--blocked,
+.guided-gate--unassigned {
   border-left-color: var(--guided-blocked);
 }
 
-.guided-gate--blocked .guided-gate__message {
+.guided-gate--blocked .guided-gate__message,
+.guided-gate--unassigned .guided-gate__message {
   color: var(--guided-blocked);
 }
 
