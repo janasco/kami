@@ -238,6 +238,29 @@ export const resolveIntrinsicAspect = (value: unknown): number | null => {
 }
 
 /**
+ * The intrinsic size of an image element, read off the element itself.
+ *
+ * Takes anything shaped like an `HTMLImageElement` on purpose. The measurement
+ * is two DOM properties, but the *rule* about when a measurement is usable is
+ * {@link resolveIntrinsicSize}'s, and this routes through it so there is one
+ * definition of "a size somebody measured" rather than two that can drift.
+ *
+ * The reason this exists at all: `naturalWidth` is the only honest source for a
+ * background image's size, and it is readable from the element *without* waiting
+ * for a `load` event to reach a framework. See
+ * `measureExportBackgroundScales` for where that matters to a PNG.
+ */
+export const measureIntrinsicSize = (
+  image: { naturalWidth: number; naturalHeight: number } | null | undefined,
+): { width: number; height: number } | null => {
+  if (!image) return null
+  // `naturalWidth > 0` rather than `!== 0`: an element that has not decoded yet,
+  // and one the browser refuses to decode, both report 0, and neither is a size.
+  if (!(image.naturalWidth > 0) || !(image.naturalHeight > 0)) return null
+  return resolveIntrinsicSize({ width: image.naturalWidth, height: image.naturalHeight })
+}
+
+/**
  * The single source of truth for the panoramic overscan factor.
  *
  * `image` and every other kind stay at 1, which is plain `cover`. A panoramic
@@ -265,6 +288,32 @@ export const resolveBackgroundScale = (
   return round4(1 + PANORAMIC_MAX_BLEED * Math.min(1, overscan / PANORAMIC_BLEED_SPAN))
 }
 
+/**
+ * The custom property the stylesheet turns the overscan factor into a transform
+ * with, exported as the name rather than repeated as a literal.
+ *
+ * The export stage sets this same property on its own node at capture time, so
+ * a rename that only touched one of the two writers would leave the PNG drawing
+ * at `scale(1)`. `backgroundFill.test.ts` asserts the name is the key in the
+ * published block, which is what makes that rename impossible to get past the
+ * suite.
+ */
+export const BACKGROUND_SCALE_VARIABLE = '--background-scale'
+
+/**
+ * The exact declaration text for {@link BACKGROUND_SCALE_VARIABLE}.
+ *
+ * The single place a measurement becomes a CSS value. The renderer publishes it
+ * in the fill block and the export stage writes it straight onto the node it is
+ * about to rasterise; both call this, so a panoramic PNG and a panoramic preview
+ * are the same string by construction rather than by inspection.
+ */
+export const formatBackgroundScale = (
+  kind: unknown,
+  imageAspectRatio: unknown,
+  profileAspectRatio: unknown,
+): string => String(resolveBackgroundScale(kind, imageAspectRatio, profileAspectRatio))
+
 export interface BackgroundFillStyleOptions {
   /** The stored fill, if the slide has one. Absent resolves to the theme. */
   fill?: BackgroundFill | null
@@ -284,6 +333,16 @@ export interface BackgroundFillStyleOptions {
  * The full set is always published, never partly, so the stylesheet never has
  * to guess a value and a missing variable can never mean a different colour in
  * preview than in export. `--background-scale` is `1` outside `panoramic`.
+ *
+ * `--background-scale` is also the only value here that depends on a
+ * *measurement*, and that has a consequence for the export. Everything else is
+ * a function of the document, so the render that mounted the node already had
+ * the right value painted. The scale depends on the background image's intrinsic
+ * size, which is only knowable once the browser has decoded it, and a PNG is
+ * rasterised at one instant: the export re-derives this one value from the DOM
+ * immediately before it rasterises, so it cannot depend on when React committed a
+ * re-render. `backgroundFill.test.ts` asserts that no second value in this block
+ * moves when the measurement does.
  */
 export const getBackgroundFillStyle = ({
   fill,
@@ -306,11 +365,11 @@ export const getBackgroundFillStyle = ({
     // image degrades to the theme instead of exporting a hole.
     '--background-paint': paint,
     '--background-position': formatFocalPoint(focalPoint),
-    '--background-scale': String(resolveBackgroundScale(
+    '--background-scale': formatBackgroundScale(
       resolved.kind,
       resolveIntrinsicAspect(intrinsicSize),
       profileAspectRatio,
-    )),
+    ),
     '--background-blend': resolveBackgroundBlend(resolved.blend),
   }
 }

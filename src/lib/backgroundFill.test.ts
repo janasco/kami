@@ -8,13 +8,16 @@ import {
   DEFAULT_BACKGROUND_GRADIENT,
 } from '../data'
 import {
+  BACKGROUND_SCALE_VARIABLE,
   clampFocalPoint,
   describeBackgroundFill,
+  formatBackgroundScale,
   formatFocalPoint,
   getBackgroundFillStyle,
   getThemePaint,
   isBackgroundFillKind,
   isDefaultFocalPoint,
+  measureIntrinsicSize,
   resolveBackgroundBlend,
   resolveBackgroundFill,
   resolveBackgroundScale,
@@ -203,6 +206,28 @@ describe('intrinsic size hints', () => {
     expect(resolveIntrinsicSize(null)).toBeNull()
     expect(resolveIntrinsicSize(undefined)).toBeNull()
   })
+
+  it('reads a decoded element off its own properties, with no load event involved', () => {
+    // The seam the export measures through. jsdom never decodes an image and never
+    // fires `load` for a data URL, so the measurement is specified structurally —
+    // two numbers off an element — and tested here as such. A plain object is a
+    // faithful stand-in for `HTMLImageElement` because nothing else is read.
+    expect(measureIntrinsicSize({ naturalWidth: 3000, naturalHeight: 1000 }))
+      .toEqual({ width: 3000, height: 1000 })
+  })
+
+  it('treats a zero, partial, or absent measurement as no measurement at all', () => {
+    // `naturalWidth === 0` is three different things — not decoded yet, refused
+    // by the browser, or an SVG with no intrinsic size — and none of them is a
+    // size. Reporting any of them would put a guessed crop into a PNG.
+    expect(measureIntrinsicSize({ naturalWidth: 0, naturalHeight: 0 })).toBeNull()
+    expect(measureIntrinsicSize({ naturalWidth: 3000, naturalHeight: 0 })).toBeNull()
+    expect(measureIntrinsicSize({ naturalWidth: 0, naturalHeight: 1000 })).toBeNull()
+    expect(measureIntrinsicSize({ naturalWidth: -1, naturalHeight: 1000 })).toBeNull()
+    expect(measureIntrinsicSize({ naturalWidth: Number.NaN, naturalHeight: 1000 })).toBeNull()
+    expect(measureIntrinsicSize(null)).toBeNull()
+    expect(measureIntrinsicSize(undefined)).toBeNull()
+  })
 })
 
 describe('background fill style', () => {
@@ -278,5 +303,71 @@ describe('background fill style', () => {
     const focalPoint: FocalPoint = { x: 0.2, y: 0.8 }
     const options = { ...base, fill: { kind: 'panoramic' as const, blend: 'screen' as const }, focalPoint, intrinsicSize: { width: 2400, height: 600 } }
     expect(styleFor(options)).toEqual(styleFor(options))
+  })
+})
+
+describe('the one measurement-dependent value in the fill block', () => {
+  const base = { themeId: 'midnight' as const, profileAspectRatio: APP_STORE_ASPECT }
+  const KINDS: BackgroundFill[] = [
+    { kind: 'theme' },
+    { kind: 'solid', color: '#0b1020' },
+    { kind: 'gradient' },
+    { kind: 'image', blend: 'screen' },
+    { kind: 'panoramic', blend: 'multiply' },
+  ]
+
+  it('moves --background-scale and nothing else when the measurement moves', () => {
+    /*
+     * The scope of the whole export fix, asserted rather than asserted-by-me.
+     *
+     * `--background-scale` is the only value in the block that comes from a
+     * measurement instead of the document, which is why it is the only one the
+     * export has to re-derive at capture time and the only one that could ever
+     * be silently wrong. If a second measurement-dependent value is ever added,
+     * this fails and names it, and the export has to learn about it too.
+     */
+    for (const fill of KINDS) {
+      const withoutHint = styleFor({ ...base, fill, intrinsicSize: null })
+      const withHint = styleFor({ ...base, fill, intrinsicSize: { width: 3000, height: 1000 } })
+      const moved = Object.keys(withoutHint).filter((key) => withoutHint[key] !== withHint[key])
+      expect({ kind: fill.kind, moved }).toEqual({
+        kind: fill.kind,
+        moved: fill.kind === 'panoramic' ? [BACKGROUND_SCALE_VARIABLE] : [],
+      })
+    }
+  })
+
+  it('names the variable the stylesheet consumes, so the two writers cannot drift', () => {
+    // The export writes this property onto its own node at capture time. A
+    // rename that reached only one of the two writers would leave every PNG
+    // drawing at `scale(1)`, and nothing else in the suite would notice.
+    expect(BACKGROUND_SCALE_VARIABLE).toBe('--background-scale')
+    expect(Object.keys(styleFor({ ...base, fill: { kind: 'panoramic' } })))
+      .toContain(BACKGROUND_SCALE_VARIABLE)
+  })
+
+  it('formats the declaration the block publishes, for every kind and size', () => {
+    // One function, two callers: the renderer publishes it and the export writes
+    // it straight onto the node it is about to rasterise. Asserting they are the
+    // same string is what keeps a panoramic preview and a panoramic PNG from
+    // becoming two answers to one question.
+    for (const fill of KINDS) {
+      for (const size of [null, { width: 1, height: 1 }, { width: 3000, height: 1000 }, { width: 2400, height: 600 }]) {
+        const style = styleFor({ ...base, fill, intrinsicSize: size })
+        expect(style[BACKGROUND_SCALE_VARIABLE]).toBe(
+          formatBackgroundScale(fill.kind, size ? size.width / size.height : null, APP_STORE_ASPECT),
+        )
+      }
+    }
+  })
+
+  it('is what the export writes for a panoramic backdrop measured at 21:9', () => {
+    // The number an actual PNG depends on, spelled out so a change to the bleed
+    // curve has to be a decision in this file rather than a drift in a pixel.
+    const panorama = { width: 2560, height: 1097 }
+    expect(formatBackgroundScale('panoramic', panorama.width / panorama.height, APP_STORE_ASPECT))
+      .toBe(String(1 + PANORAMIC_MAX_BLEED))
+    expect(formatBackgroundScale('panoramic', panorama.width / panorama.height, APP_STORE_ASPECT))
+      .not.toBe(formatBackgroundScale('panoramic', null, APP_STORE_ASPECT))
   })
 })

@@ -18,6 +18,7 @@ import {
   serializeProject,
 } from './lib/project'
 import { exportSlidesAsZip } from './lib/exportSlides'
+import { measureExportBackgroundScales } from './lib/exportBackgroundScale'
 import { planExportEntries, unassignedExportRefusal, variantExportRefusal } from './lib/exportPlan'
 import {
   collectExportPreflightBounds,
@@ -1414,6 +1415,30 @@ function App() {
           `The export canvas mounted ${mountedNodes} of ${expectedNodes} slides, so the bundle would have been incomplete. Nothing was downloaded.`,
         )
       }
+
+      /*
+       * Measure the panoramic overscan off the DOM, now, before anything is
+       * rasterised.
+       *
+       * `--background-scale` is the one value in the canvas's background-fill
+       * block that comes from a measurement rather than from the document, and
+       * the only place the export can read it is the node itself: React's own
+       * copy reaches the stylesheet through a re-render, and `html-to-image`
+       * snapshots the node's computed style the instant it is called. A stage
+       * that mounted moments ago has an undecoded backdrop, and the transform
+       * that reaches the PNG would be `scale(1)` — a file with the panoramic
+       * bleed silently missing, reported as a success, while the preview shows
+       * it. So the wait and the measurement happen here, at the seam, where the
+       * answer can be written before the call rather than raced against it.
+       *
+       * A deck with no panoramic fill is untouched: the scale resolves to `1`,
+       * the node already carries it, and nothing is written and nothing is waited
+       * on.
+       */
+      await measureExportBackgroundScales({
+        stage: exportStageRef.current,
+        profileAspectRatio: exportProfile.width / exportProfile.height,
+      })
 
       const { archive, filename } = await exportSlidesAsZip({
         projectName,

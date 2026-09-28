@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { getLayout, getTheme, sanitizeLayerOpacity, slideLayerLabels } from '../data'
-import { getBackgroundFillStyle, resolveBackgroundFill } from '../lib/backgroundFill'
+import { getBackgroundFillStyle, measureIntrinsicSize, resolveBackgroundFill } from '../lib/backgroundFill'
 import { getDeviceFramePreset, getDeviceFrameStyle } from '../lib/devicePresets'
 import { describeCanvasGuides, untransformRect, type CanvasSize, type LayerRect } from '../lib/layerGeometry'
 import { layerOrderZIndex } from '../lib/layerOrder'
@@ -279,18 +279,37 @@ export function SlideRenderer({
   } | null>(null)
   const [backgroundImageFailed, setBackgroundImageFailed] = useState(false)
   /**
-   * The background image's real intrinsic size, measured when it loads.
+   * The background image's real intrinsic size, read off the image element.
    *
    * The stored size is only a hint, and a hand-edited project can claim any
    * aspect it likes, so the measured value wins as soon as there is one. This is
    * local state on purpose: it corrects how the canvas draws without writing
-   * back into the project behind the author's back.
+   * back into the project behind the author's back. The export does not read it
+   * — it measures the same element itself, immediately before rasterising, so a
+   * PNG never depends on when this state committed.
    */
   const [backgroundIntrinsicSize, setBackgroundIntrinsicSize] = useState<{ width: number; height: number } | null>(null)
+  const backgroundImageRef = useRef<HTMLImageElement | null>(null)
 
   useEffect(() => {
     setBackgroundImageFailed(false)
     setBackgroundIntrinsicSize(null)
+    /*
+     * Read the size off the element as well as listening for the event.
+     *
+     * A data URL the browser has already decoded never fires `load` again, and a
+     * framework does not replay a load event that fired before its handler was
+     * attached. So `onLoad` alone is not a reliable way to learn a size: a slide
+     * whose backdrop is warm in the memory cache renders at the stored hint's
+     * scale forever, which for a deck that stored no hint is a permanently
+     * missing panoramic bleed.
+     *
+     * The element is authoritative and needs no event, so this is the primary
+     * read — it covers the warm-cache case the event cannot — and `onLoad` is
+     * what covers an image still on its way. Between them there is no window in
+     * which the element has a size and this state does not.
+     */
+    setBackgroundIntrinsicSize(measureIntrinsicSize(backgroundImageRef.current))
   }, [slide.backgroundImage?.dataUrl])
 
   /**
@@ -541,15 +560,17 @@ export function SlideRenderer({
         >
           {slide.backgroundImage && !backgroundImageFailed && (
             <img
+              ref={backgroundImageRef}
               src={slide.backgroundImage.dataUrl}
               alt={`Background image for slide ${slideNumber}`}
               draggable={false}
               onError={() => setBackgroundImageFailed(true)}
-              onLoad={(event) => {
-                const { naturalWidth, naturalHeight } = event.currentTarget
-                if (naturalWidth > 0 && naturalHeight > 0) {
-                  setBackgroundIntrinsicSize({ width: naturalWidth, height: naturalHeight })
-                }
+              onLoad={() => {
+                // The value is read off the element either way; what this handler
+                // is for is the render. An image decoding does not re-render
+                // anything by itself, so without it the measurement below would
+                // sit in state until something unrelated caused a commit.
+                setBackgroundIntrinsicSize(measureIntrinsicSize(backgroundImageRef.current))
               }}
             />
           )}

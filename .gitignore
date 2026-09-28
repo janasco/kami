@@ -28,5 +28,6 @@ kami-exports/
 # recorded test manifest that makes deleting or renaming a test a gate failure.
 scripts/gate/.run.json
 scripts/gate/.roundtrip.mjs
+scripts/gate/.roundtrip-meta.json
 
 # Keep screenshot-studio.json tracked: it is the reproducible project file.

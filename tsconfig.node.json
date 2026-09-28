@@ -24,7 +24,23 @@
    * `ProjectFile`, which `src/lib/project.ts` declares without `export` and
    * `src/types.ts` does not have at all.
    *
-   * Anything the gate runs has to be typechecked by the gate.
+   * Anything the gate runs has to be typechecked by the gate, and that is two
+   * claims, not one. The *source* is: this project. The *artefact* is not, because
+   * esbuild is what produces it and esbuild does not typecheck. Type erasure
+   * cannot turn a checked file into a broken one, so the source claim is most of
+   * it; what it does not cover is the module graph, since esbuild resolves imports
+   * by its own rules and nothing asserted it resolved what `tsc` resolved. That
+   * gap is now closed rather than assumed: `scripts/gate.mjs` passes `--listFiles`
+   * to check 1 and compares the list against esbuild's `--metafile`, and the
+   * round-trip check fails if the bundle contains a file no project here includes.
+   *
+   * What is still untyped, stated so this is not read as stronger than it is: the
+   * gate's own `.mjs`. `gate.mjs`, the three validators and `testIdentity.mjs` are
+   * plain JavaScript so node runs them with no build step, and nothing
+   * typechecks them. The one the test suite imports carries a hand-written
+   * `testIdentity.d.mts`, which `tsc` reads *instead of* the implementation, so
+   * the declaration and the code can drift without anything noticing. Closing
+   * that means `checkJs` over five files, which is a different piece of work.
    */
   "include": ["vite.config.ts", "vitest.config.ts", "scripts/**/*.ts"]
 }

@@ -77,6 +77,14 @@ const formatProjectDocument = (file: ProjectFile): string => `${JSON.stringify(f
  * below stops narrowing — so the code after it reached into the *error* arm of a
  * discriminated union. That is exactly the class of mistake a gate must not make,
  * and it was only visible once `scripts/` entered `tsconfig`.
+ *
+ * Being in the tsconfig is what puts this file under `tsc`; it is not what
+ * typechecks what runs. `scripts/gate.mjs` bundles this file with esbuild and
+ * executes the bundle, and esbuild erases `import type` without reading it — so
+ * the gate compares esbuild's metafile against `tsc --listFiles` and fails the
+ * round-trip check if the bundle contains a file no tsconfig covers. Without
+ * that, "this file is typechecked" would be a claim about a source file rather
+ * than about the thing being executed.
  */
 const fail: (message: string, detail?: string) => never = (message, detail) => {
   process.stdout.write(`  round trip FAILED: ${message}\n`)
