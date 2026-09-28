@@ -24,4 +24,9 @@ kami-exports/
 .tmp/
 *.tmp
 
+# Gate scratch files. scripts/gate/baseline.json IS tracked on purpose: it is the
+# recorded test manifest that makes deleting or renaming a test a gate failure.
+scripts/gate/.run.json
+scripts/gate/.roundtrip.mjs
+
 # Keep screenshot-studio.json tracked: it is the reproducible project file.

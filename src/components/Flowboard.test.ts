@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
-import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { parseStylesheet } from '../test/stylesheet'
 import { runExportPreflight } from '../lib/exportPreflight'
 import { describeFlowboardSelection } from '../lib/flowboardSelection'
 import { resolveFlowboardExportGate } from '../lib/flowboardExportState'
@@ -428,6 +428,7 @@ describe('Flowboard', () => {
       activeVariantId: props.activeVariantId,
       onVariantPreviewChange: props.onVariantPreviewChange,
       onVariantProfileChange: props.onVariantProfileChange,
+      onVariantLocaleChange: props.onVariantLocaleChange,
       onVariantToggleEnabled: props.onVariantToggleEnabled,
       onVariantRename: props.onVariantRename,
       onVariantAdd: props.onVariantAdd,
@@ -479,6 +480,7 @@ describe('Flowboard', () => {
       activeVariantId: props.activeVariantId,
       onVariantPreviewChange: props.onVariantPreviewChange,
       onVariantProfileChange: props.onVariantProfileChange,
+      onVariantLocaleChange: props.onVariantLocaleChange,
       onVariantToggleEnabled: props.onVariantToggleEnabled,
       onVariantRename: props.onVariantRename,
       onVariantAdd: props.onVariantAdd,
@@ -540,6 +542,7 @@ describe('Flowboard', () => {
       activeVariantId: props.activeVariantId,
       onVariantPreviewChange: props.onVariantPreviewChange,
       onVariantProfileChange: props.onVariantProfileChange,
+      onVariantLocaleChange: props.onVariantLocaleChange,
       onVariantToggleEnabled: props.onVariantToggleEnabled,
       onVariantRename: props.onVariantRename,
       onVariantAdd: props.onVariantAdd,
@@ -631,6 +634,7 @@ describe('Flowboard shell layout', () => {
       activeVariantId: props.activeVariantId,
       onVariantPreviewChange: props.onVariantPreviewChange,
       onVariantProfileChange: props.onVariantProfileChange,
+      onVariantLocaleChange: props.onVariantLocaleChange,
       onVariantToggleEnabled: props.onVariantToggleEnabled,
       onVariantRename: props.onVariantRename,
       onVariantAdd: props.onVariantAdd,
@@ -657,13 +661,13 @@ describe('Flowboard shell layout', () => {
 
   it('keeps the inspector drawer scrollable instead of clipping it', () => {
     const props = makeProps()
-    const css = readFileSync(new URL('./flowboard/flowboard.css', import.meta.url), 'utf8')
+    const css = parseStylesheet('src/components/flowboard/flowboard.css')
     // The drawer must hand the Inspector a bounded flex column, and the
     // Inspector's own scroll region is what actually scrolls.
-    expect(css).toContain('.flowboard-drawer__panel {\n  display: flex;')
-    expect(css).toContain('max-height: min(620px, 68vh);')
-    expect(css).toContain('.flowboard-drawer__panel .inspector__scroll {')
-    expect(css).toContain('overflow-y: auto;')
+    expect(css.value('.flowboard-drawer__panel', 'display')).toBe('flex')
+    expect(css.value('.flowboard-drawer__panel', 'max-height')).toBe('min(620px, 68vh)')
+    expect(css.hasRule('.flowboard-drawer__panel .inspector__scroll')).toBe(true)
+    expect(css.value('.flowboard-drawer__panel .inspector__scroll', 'overflow-y')).toBe('auto')
 
     // And the drawer is closed until the author asks for it, with a way back out.
     const closed = renderToStaticMarkup(createElement(RefineStage, {
@@ -677,37 +681,40 @@ describe('Flowboard shell layout', () => {
   })
 
   it('lays the body out as the main area and one right rail, with explicit tracks', () => {
-    const css = readFileSync(new URL('./flowboard/flowboard.css', import.meta.url), 'utf8')
+    const css = parseStylesheet('src/components/flowboard/flowboard.css')
     // The desktop body is two written-out tracks, not a content count.
-    expect(css).toMatch(/\.flowboard-body \{\n(?:.*\n)*?  grid-template-columns: minmax\(0, 1fr\) var\(--flow-rail-width\);/)
-    expect(css).toContain('grid-template-rows: minmax(0, 1fr);')
+    expect(css.value('.flowboard-body', 'grid-template-columns')).toBe('minmax(0, 1fr) var(--flow-rail-width)')
+    expect(css.value('.flowboard-body', 'grid-template-rows')).toBe('minmax(0, 1fr)')
     // One rail width token, and none of the old three-zone widths.
-    expect(css).toContain('--flow-rail-width:')
-    expect(css).not.toContain('--flow-context-width')
+    expect(css.raw()).toContain('--flow-rail-width')
+    expect(css.raw()).not.toContain('--flow-context-width')
     // Below the desktop limit the rail leaves the grid entirely, so the main
     // area really is the full width of the viewport.
-    expect(css).toMatch(/@media \(max-width: 1199px\) \{\n  \.flowboard-body \{\n    grid-template-columns: minmax\(0, 1fr\);/)
+    const tablet = css.withinMedia('(max-width: 1199px)')
+    expect(tablet.value('.flowboard-body', 'grid-template-columns')).toBe('minmax(0, 1fr)')
     // No shell region is sized by a content count: that is what left holes
     // beside a stage panel. Uniform repeated-item grids inside a panel are a
     // different question and keep their own templates.
     for (const selector of ['.flowboard-body', '.flowboard-stage-body', '.flowboard-steps__list']) {
-      const rule = css.slice(css.indexOf(`${selector} {`), css.indexOf('}', css.indexOf(`${selector} {`)))
-      expect(rule).not.toContain('auto-fit')
+      expect(css.declarations(selector)['grid-template-columns'] ?? '').not.toContain('auto-fit')
+      expect(css.declarations(selector)['grid-template-rows'] ?? '').not.toContain('auto-fit')
     }
   })
 
   it('keeps the rail scrollable and the drawer out of its way', () => {
-    const css = readFileSync(new URL('./flowboard/flowboard.css', import.meta.url), 'utf8')
+    const css = parseStylesheet('src/components/flowboard/flowboard.css')
     // The wrap is bounded, and the panel inside it is the scroll region, so the
     // rail is never a fixed-height column with a cut-off bottom.
-    expect(css).toMatch(/\.flowboard-rail-wrap \{[\s\S]*?overflow: hidden;/)
-    expect(css).toMatch(/\.flowboard-rail \{[\s\S]*?min-height: 0;[\s\S]*?overflow-y: auto;/)
+    expect(css.value('.flowboard-rail-wrap', 'overflow')).toBe('hidden')
+    // The parser normalises a unitless zero to `0px`, which is the same length.
+    expect(css.value('.flowboard-rail', 'min-height')).toBe('0px')
+    expect(css.value('.flowboard-rail', 'overflow-y')).toBe('auto')
     // On a desktop the rail is a real grid track, so it cannot be positioned
-    // over the Inspector drawer and fight it for the same pixels.
-    const start = css.indexOf('\n.flowboard-rail-wrap {')
-    const base = css.slice(start, css.indexOf('}', start))
-    expect(base).not.toContain('position: fixed')
-    expect(base).toContain('overflow: hidden;')
+    // over the Inspector drawer and fight it for the same pixels. The top-level
+    // view excludes at-rule bodies, so this sees the desktop rule and not the
+    // mobile sheet, which really is fixed.
+    expect(css.declarations('.flowboard-rail-wrap')['position']).toBeUndefined()
+    expect(css.declarations('.flowboard-rail-wrap')['overflow']).toBe('hidden')
   })
 })
 

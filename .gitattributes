@@ -1,0 +1,35 @@
+# Normalize text line endings to LF in the repository and in every checkout.
+#
+# This is not cosmetic. The test suite asserts on the *text* of stylesheets and
+# on serialized project JSON, so a CRLF checkout can change test outcomes even
+# when no code changed. `core.autocrlf=true` on Windows was enough to fail
+# three assertions on line endings alone.
+#
+# `text=auto` lets Git detect text vs binary per file; `eol=lf` then pins the
+# working-tree form so a developer's platform cannot change what CI sees.
+* text=auto eol=lf
+
+# Generated bundles and lockfiles are compared byte-for-byte in places, so keep
+# them out of end-of-line conversion entirely.
+package-lock.json -text
+
+# Binary assets. Never diffed, never converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.mp4 binary
+*.mov binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.zip binary
+*.pdf binary
+*.aab binary
+*.apk binary
+*.ipa binary

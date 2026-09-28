@@ -12,5 +12,19 @@
     "noEmit": true,
     "strict": true
   },
-  "include": ["vite.config.ts", "vitest.config.ts"]
+  /**
+   * `scripts/gate/*.ts` is in here, not left out.
+   *
+   * The gate's strongest check — the byte-identical round trip that reconciles
+   * every document against the real serializer — is TypeScript, and it was
+   * outside every tsconfig. So `tsc -b` never saw it, vitest never imported it,
+   * and esbuild bundles it without typechecking and erases `import type`
+   * entirely. A hard type error in that file could not fail `npm run gate`, which
+   * is the one thing a gate exists to prevent. It had one: it imported
+   * `ProjectFile`, which `src/lib/project.ts` declares without `export` and
+   * `src/types.ts` does not have at all.
+   *
+   * Anything the gate runs has to be typechecked by the gate.
+   */
+  "include": ["vite.config.ts", "vitest.config.ts", "scripts/**/*.ts"]
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
-import { readFileSync } from 'node:fs'
+import { parseStylesheet, parseStylesheetSource } from '../test/stylesheet'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   evaluateFlowboardStages,
@@ -159,26 +159,38 @@ describe('the one rail', () => {
 })
 
 describe('the rail stylesheet', () => {
-  const css = readFileSync(new URL('./flowboard/flowboard.css', import.meta.url), 'utf8')
+  const css = parseStylesheet('src/components/flowboard/flowboard.css')
+  const tablet = css.withinMedia('(max-width: 1199px)')
+  const phone = css.withinMedia('(max-width: 767px)')
 
   it('keeps the sheet rules inside the two narrow breakpoints', () => {
     // The rail is fixed only where it is a sheet, and the phone gets a side
     // sheet rather than a bottom one.
-    expect(css).toMatch(/@media \(max-width: 1199px\) \{[\s\S]*?\.flowboard-rail-wrap \{[\s\S]*?translateY\(101%\);/)
-    expect(css).toMatch(/@media \(max-width: 767px\) \{[\s\S]*?\.flowboard-rail-wrap \{[\s\S]*?translateX\(101%\);/)
+    expect(tablet.value('.flowboard-rail-wrap', 'transform')).toContain('translateY(101%)')
+    expect(phone.value('.flowboard-rail-wrap', 'transform')).toContain('translateX(101%)')
     // A closed sheet is invisible as well as translated, so it cannot be seen
     // or reached before the author opens it.
-    expect(css).toMatch(/\.flowboard-rail-wrap \{[\s\S]*?visibility: hidden;/)
+    expect(tablet.value('.flowboard-rail-wrap', 'visibility')).toBe('hidden')
+    // And on a desktop the rail is a grid track, not an overlay, so the
+    // top-level view must see no `position` on it at all.
+    expect(css.declarations('.flowboard-rail-wrap')['position']).toBeUndefined()
   })
 
   it('shows the rail toggle wherever the rail is a sheet', () => {
-    expect(css).toMatch(/\.flowboard-rail-toggle \{\n  display: none;/)
-    expect(css).toMatch(/@media \(max-width: 1199px\) \{[\s\S]*?\.flowboard-rail-toggle \{\n    display: inline-flex;/)
+    expect(css.value('.flowboard-rail-toggle', 'display')).toBe('none')
+    expect(tablet.value('.flowboard-rail-toggle', 'display')).toBe('inline-flex')
   })
 
   it('never sets type below the readable floor in the rail', () => {
-    const railRules = css.slice(css.indexOf('/* The one rail:'), css.indexOf('/* Main stage area */'))
-    for (const match of railRules.matchAll(/font-size:\s*([\d.]+)px/g)) {
+    // Anchored to the comment banners rather than a line offset, so this is
+    // indifferent to line endings and to how many rules the region holds.
+    const text = css.source()
+    const start = text.indexOf('/* The one rail:')
+    const end = text.indexOf('/* Main stage area */')
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    const region = parseStylesheetSource(text.slice(start, end))
+    for (const match of region.raw().matchAll(/font-size:\s*([\d.]+)px/g)) {
       expect(Number(match[1])).toBeGreaterThanOrEqual(12)
     }
   })

@@ -11,6 +11,8 @@
     "check:demo": "node scripts/validate-demo.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "gate": "node scripts/gate.mjs",
+    "gate:update": "node scripts/gate.mjs --update",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -20,10 +22,15 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.6.2",
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^30.1.1",
     "typescript": "~5.7.2",
     "vite": "^6.0.5",
     "vitest": "^4.1.11"

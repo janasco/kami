@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
-import { readFileSync } from 'node:fs'
+import { parseStylesheet } from '../test/stylesheet'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createDefaultOutputVariant } from '../lib/deviceVariants'
 import { AUTHORING_CANVAS_ID } from '../lib/deviceVariants'
@@ -170,9 +170,9 @@ describe('the merged per-variant preview', () => {
     expect(markup).not.toContain('tabindex="0"')
     expect(markup).not.toContain('aria-pressed=')
     // And the stylesheet draws a different surface, not just a different label.
-    const css = readFileSync(new URL('./flowboard/flowboard.css', import.meta.url), 'utf8')
-    expect(css).toMatch(/\.variant-preview \{[\s\S]*?border: 1px dashed #c9c8d4;/)
-    expect(css).toMatch(/\.variant-preview\[data-variant-preview="read-only"\]/)
+    const css = parseStylesheet('src/components/flowboard/flowboard.css')
+    expect(css.value('.variant-preview', 'border')).toContain('dashed')
+    expect(css.hasRule('.variant-preview[data-variant-preview="read-only"]')).toBe(true)
   })
 
   it('carries the export marker, which is the flag that disables dragging', () => {
@@ -311,17 +311,17 @@ describe('returning to the editable canvas', () => {
 })
 
 describe('the merged preview stylesheet', () => {
+  const css = parseStylesheet('src/components/flowboard/flowboard.css')
+
   it('wraps a long label rather than letting it overflow', () => {
-    const css = readFileSync(new URL('./flowboard/flowboard.css', import.meta.url), 'utf8')
-    expect(css).toMatch(/\.variant-preview__bar \{[\s\S]*?flex-wrap: wrap;/)
-    expect(css).toMatch(/\.variant-preview__state \{[\s\S]*?min-width: 0;/)
+    expect(css.value('.variant-preview__bar', 'flex-wrap')).toBe('wrap')
+    expect(css.value('.variant-preview__state', 'min-width')).toBe('0px')
   })
 
   it('scales the exported canvas down with a transform, never a second renderer', () => {
-    const css = readFileSync(new URL('./flowboard/flowboard.css', import.meta.url), 'utf8')
     // A transform keeps the DOM the export would rasterise identical, and it is
     // the one effect html-to-image reproduces reliably.
-    expect(css).toMatch(/\.variant-preview__frame \{[\s\S]*?overflow: hidden;/)
-    expect(css).toMatch(/\.variant-preview__canvas \{[\s\S]*?transform-origin: center;/)
+    expect(css.value('.variant-preview__frame', 'overflow')).toBe('hidden')
+    expect(css.value('.variant-preview__canvas', 'transform-origin')).toBe('center')
   })
 })

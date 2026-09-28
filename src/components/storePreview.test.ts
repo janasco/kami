@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
-import { readFileSync } from 'node:fs'
+import { parseStylesheet } from '../test/stylesheet'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AUTHORING_CANVAS_ID } from '../lib/deviceVariants'
 import { planExportEntries } from '../lib/exportPlan'
@@ -194,22 +194,22 @@ describe('the store listing preview', () => {
 })
 
 describe('the store preview stylesheet', () => {
-  const css = readFileSync(new URL('./flowboard/flowboard.css', import.meta.url), 'utf8')
+  const css = parseStylesheet('src/components/flowboard/flowboard.css')
 
   it('lays the leading tiles out in one flexible row that wraps', () => {
-    expect(css).toMatch(/\.store-preview__leading \{[\s\S]*?display: flex;/)
-    expect(css).toMatch(/\.store-preview__leading \{[\s\S]*?flex-wrap: wrap;/)
+    expect(css.value('.store-preview__leading', 'display')).toBe('flex')
+    expect(css.value('.store-preview__leading', 'flex-wrap')).toBe('wrap')
   })
 
   it('gives every tile a stable frame, so a changing headline cannot resize the row', () => {
-    expect(css).toMatch(/\.store-preview__tile \{[\s\S]*?aspect-ratio:/)
-    expect(css).toMatch(/\.store-preview__headline \{[\s\S]*?min-width: 0;/)
-    expect(css).toMatch(/\.store-preview__headline \{[\s\S]*?overflow-wrap: anywhere;/)
+    expect(css.value('.store-preview__tile', 'aspect-ratio')).toBeDefined()
+    expect(css.value('.store-preview__headline', 'min-width')).toBe('0px')
+    expect(css.value('.store-preview__headline', 'overflow-wrap')).toBe('anywhere')
   })
 
   it('reuses the thumbnail size rather than restyling a slide', () => {
     // The tiles are the cheap path, so the stylesheet dresses them and never
     // reaches inside to redraw a layer.
-    expect(css).toMatch(/\.store-preview__tile \.flowboard-thumb \{/)
+    expect(css.hasRule('.store-preview__tile .flowboard-thumb')).toBe(true)
   })
 })

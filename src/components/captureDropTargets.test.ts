@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
-import { readFileSync } from 'node:fs'
+import { parseStylesheet } from '../test/stylesheet'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describeFlowboardSelection } from '../lib/flowboardSelection'
 import { exportProfiles } from '../data'
@@ -209,26 +209,35 @@ describe('capture drop targets', () => {
 
 describe('the drop target stylesheet', () => {
   it('gives every target one ring, a hint, and a source state', () => {
-    const css = readFileSync(new URL('./flowboard/flowboard.css', import.meta.url), 'utf8')
-    expect(css).toContain('.flowboard-drop-target {')
-    expect(css).toContain('.flowboard-drop-target.is-drop-active {')
-    expect(css).toContain('.flowboard-drop-target.is-drag-source {')
-    expect(css).toContain('.flowboard-drop-hint {')
+    const css = parseStylesheet('src/components/flowboard/flowboard.css')
+    for (const selector of [
+      '.flowboard-drop-target',
+      '.flowboard-drop-target.is-drop-active',
+      '.flowboard-drop-target.is-drag-source',
+      '.flowboard-drop-hint',
+    ]) {
+      expect(css.hasRule(selector)).toBe(true)
+    }
     // The hint sits over the thumbnail but never takes the pointer, so a drop is
     // still received by the card underneath it.
-    expect(css).toMatch(/\.flowboard-drop-hint \{[\s\S]*?pointer-events: none;/)
+    expect(css.value('.flowboard-drop-hint', 'pointer-events')).toBe('none')
     // The ring reuses the focus colour, so a drop target and a keyboard focus
     // read as the same kind of affordance.
-    expect(css).toMatch(/\.flowboard-drop-target\.is-drop-active \{[\s\S]*?var\(--flow-focus/)
+    //
+    // Asserted on `outline` specifically. The old text match was
+    // `selector {[\s\S]*?var(--flow-focus`, which is not scoped to the rule: it
+    // was satisfied by an unrelated focus rule *earlier* in the file, so it
+    // passed even when this rule stopped using the token.
+    expect(css.value('.flowboard-drop-target.is-drop-active', 'outline')).toContain('var(--flow-focus')
   })
 
   it('lights the device placeholder from inside the aperture', () => {
-    const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
+    const css = parseStylesheet('src/styles.css')
     // An inset ring, because the aperture clips anything drawn past its edge.
-    expect(css).toMatch(/\.device-placeholder\.is-drop-active \{[\s\S]*?outline-offset: -8px;/)
+    expect(css.value('.device-placeholder.is-drop-active', 'outline-offset')).toBe('-8px')
     // The button keeps its own rule, so the import path and the export are
     // unchanged when nothing is being dragged over it.
-    expect(css).toMatch(/\.device-placeholder \{[\s\S]*?cursor: pointer;/)
+    expect(css.value('.device-placeholder', 'cursor')).toBe('pointer')
   })
 })
 
