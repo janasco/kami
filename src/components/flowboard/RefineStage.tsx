@@ -41,6 +41,19 @@ interface RefineStageProps {
   variantPreviewId?: string
   onVariantPreviewIdChange?: (variantId: string) => void
   /**
+   * Which slide of the variant the merged preview holds, or `''` to follow the
+   * deck's own selection.
+   *
+   * Held by the shell for the same reason, and for one more: the Ship stage's
+   * export manifest names a variant *and* a deck slide, and this is the only
+   * state the preview reads to decide which. While it lived here, a row that
+   * asked for slide 7 would have been overruled by whatever this stage last had
+   * in it — the two ways of choosing a slide could not both be right. The
+   * stepper below and every manifest row now write this one value.
+   */
+  variantPreviewSlideId?: string
+  onVariantPreviewSlideIdChange?: (slideId: string) => void
+  /**
    * Set when another stage, such as the Story translation matrix, asked for the
    * copy editor. The requested field is focused once the slide and locale match.
    */
@@ -75,6 +88,8 @@ export function RefineStage({
   variants = [],
   variantPreviewId = '',
   onVariantPreviewIdChange = () => undefined,
+  variantPreviewSlideId = '',
+  onVariantPreviewSlideIdChange = () => undefined,
   copyEditorRequest,
 }: RefineStageProps) {
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -85,12 +100,6 @@ export function RefineStage({
    */
   const [guidesVisible, setGuidesVisible] = useState(true)
   const [arrangeScope, setArrangeScope] = useState<ArrangeScope>('layer')
-  /**
-   * Which slide of a variant the merged preview holds. Empty means "follow the
-   * deck's selected slide", which is what it does until the author steps through
-   * the variant. Also UI-only: the preview writes nothing to either.
-   */
-  const [variantPreviewSlideId, setVariantPreviewSlideId] = useState('')
   const slide = inspector.slide
   const text = getSlideText(slide, inspector.activeLocale)
   const selectedSettings = slide.layerSettings[inspector.selectedLayerId]
@@ -183,7 +192,7 @@ export function RefineStage({
               value={previewing ? variantPreviewId : ''}
               onChange={onVariantPreviewIdChange}
               previewSlideId={variantPreviewSlideId}
-              onPreviewSlideChange={setVariantPreviewSlideId}
+              onPreviewSlideChange={onVariantPreviewSlideIdChange}
               profile={canvas.profile}
               locale={canvas.locale}
             />
