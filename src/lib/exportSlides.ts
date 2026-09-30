@@ -177,7 +177,23 @@ export async function exportSlidesAsZip({ projectName, entries, profile, stage, 
         canvasWidth: profile.width,
         canvasHeight: profile.height,
         pixelRatio: 1,
-        cacheBust: true,
+        /*
+         * No `cacheBust`.
+         *
+         * With it, every render re-fetches the Google Fonts stylesheet and all 33
+         * font files — 34 requests per slide, 97 for a three-slide export — for
+         * bytes that do not change within a session. Measured A/B with the two
+         * arms interleaved and a fresh page per run: 428.4ms against 428.0ms
+         * median, so it costs nothing today. But it makes every export depend on
+         * `fonts.gstatic.com` being reachable, and the cost scales with latency:
+         * at a simulated 2000ms the render went to 5396ms and 7142ms. A user on
+         * a slow or lossy connection, or behind a captive portal, pays that per
+         * slide.
+         *
+         * The thing it is meant to protect against — a font file changing on the
+         * server between page load and export — is not a real case within one
+         * session, and a hard refresh covers it. Caching is the better default.
+         */
         type: profile.format,
       })
       // Yield between frames so a long multi-variant export stays responsive.
