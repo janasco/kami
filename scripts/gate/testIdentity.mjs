@@ -55,7 +55,10 @@ export const IDENTITY_SEPARATOR = ' :: '
  * than print a generic "something is wrong with the baseline".
  */
 export class TestIdentityError extends Error {
-  /** The path that could not be resolved, verbatim. */
+  /**
+   * @param {string} file The path that could not be resolved, verbatim.
+   * @param {string} reason
+   */
   constructor(file, reason) {
     super(`cannot give "${file}" a portable test identity: ${reason}`)
     this.name = 'TestIdentityError'
@@ -63,6 +66,7 @@ export class TestIdentityError extends Error {
   }
 }
 
+/** @param {string} value */
 const toPosix = (value) => value.replace(/\\/g, '/')
 
 /**
@@ -73,6 +77,8 @@ const toPosix = (value) => value.replace(/\\/g, '/')
  * laptop. That is what lets one test assert both shapes on one machine, and it
  * is also what makes case-insensitive comparison (`C:` vs `c:`, `Users` vs
  * `users`) the right rule for a path vitest may have re-cased in transit.
+ *
+ * @param {string} value
  */
 const windowsShaped = (value) => /^[A-Za-z]:[\\/]/.test(value) || value.includes('\\')
 
@@ -83,6 +89,10 @@ const windowsShaped = (value) => /^[A-Za-z]:[\\/]/.test(value) || value.includes
  * the path is not inside the checkout, or when either argument is not a
  * non-empty string. There is no unshortened fallback, on purpose; see the file
  * header.
+ *
+ * @param {string} file
+ * @param {string} root
+ * @returns {string}
  */
 export const repoRelative = (file, root) => {
   if (typeof file !== 'string' || file === '' || typeof root !== 'string' || root === '') {
@@ -102,10 +112,22 @@ export const repoRelative = (file, root) => {
   return relative
 }
 
-/** The file half of an identity, i.e. everything before the separator. */
+/**
+ * The file half of an identity, i.e. everything before the separator.
+ *
+ * @param {string} identity
+ * @returns {string}
+ */
 export const identityFile = (identity) => identity.slice(0, identity.indexOf(IDENTITY_SEPARATOR))
 
-/** One identity, as recorded in `scripts/gate/baseline.json`. */
+/**
+ * One identity, as recorded in `scripts/gate/baseline.json`.
+ *
+ * @param {string} file
+ * @param {string} testName
+ * @param {string} root
+ * @returns {string}
+ */
 export const testIdentity = (file, testName, root) => `${repoRelative(file, root)}${IDENTITY_SEPARATOR}${testName}`
 
 /**
@@ -116,6 +138,9 @@ export const testIdentity = (file, testName, root) => `${repoRelative(file, root
  * `src/kami/lib/x.test.ts` (the checkout's own `src` directory, machine-specific)
  * and failed a perfectly portable `scripts/gate/x.test.ts`. This is the real
  * definition instead — relative, no drive, no backslashes, no `..`.
+ *
+ * @param {string} file
+ * @returns {boolean}
  */
 const isPortableRepoPath = (file) =>
   file !== ''
@@ -132,6 +157,9 @@ const isPortableRepoPath = (file) =>
  * baseline hand-edited, or one written by an older gate — because a comparison
  * against those is meaningless in both directions, and reporting a confident
  * wrong answer is what this whole check exists to avoid.
+ *
+ * @param {readonly string[]} identities
+ * @returns {string[]}
  */
 export const nonPortableIdentities = (identities) =>
   identities.filter((identity) => !isPortableRepoPath(identityFile(identity)))

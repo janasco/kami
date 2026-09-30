@@ -4,7 +4,7 @@
     "target": "ES2022",
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "allowJs": false,
+    "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
@@ -19,5 +19,25 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
+  /**
+   * `allowJs: true`, for one file.
+   *
+   * `src/gate/repoRelative.test.ts` imports `scripts/gate/testIdentity.mjs`.
+   * That import used to resolve to a hand-written `testIdentity.d.mts`, which
+   * `tsc` reads *instead of* the implementation beside it — so the types this
+   * project checked were the ones someone remembered, and the declaration could
+   * drift from the code with nothing noticing. The declaration is gone and
+   * `scripts/gate/testIdentity.mjs` is the implementation `tsc` now reads.
+   *
+   * `allowJs: false` cannot resolve a bare `.mjs`, so the import would fail with
+   * TS2307; this is the switch that lets the test see the real signatures. It does
+   * not turn on `checkJs`, so the file is not *checked* here — it is checked once,
+   * by `tsconfig.node.json`, which has `checkJs` and an explicit include for it.
+   * Checking it in both projects would report the same diagnostic twice and fail
+   * `tsc -b` for one reason in two places.
+   *
+   * Nothing under `src/` is JavaScript, so this widens the program's input by
+   * exactly the one file the test already imported.
+   */
   "include": ["src"]
 }

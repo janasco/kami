@@ -45,6 +45,49 @@ const reportPath = resolve(root, 'scripts/gate/.run.json')
 const bundlePath = resolve(root, 'scripts/gate/.roundtrip.mjs')
 const metaPath = resolve(root, 'scripts/gate/.roundtrip-meta.json')
 
+/**
+ * The two dynamic shapes this script reads, stated once.
+ *
+ * Both arrive as `JSON.parse`, which is declared as returning `any`, so without
+ * these every read of the vitest report and of the baseline is unchecked — which
+ * is how a report that renamed `testResults` would quietly compare as zero tests
+ * rather than as an error. These are the fields the code below actually uses,
+ * spelled as optional because a report written by a crashed or older run does not
+ * have to have them; every use is already `?.` or `??` guarded.
+ *
+ * @typedef {{
+ *   numTotalTests?: number,
+ *   testResults?: Array<{
+ *     name: string,
+ *     assertionResults?: Array<{
+ *       fullName?: string,
+ *       title: string,
+ *       status?: string,
+ *       failureMessages?: string[],
+ *     }>,
+ *   }>,
+ * }} VitestReport
+ */
+
+/**
+ * One recorded gate result: the name it is reported under, whether it passed, and
+ * the sentence printed next to it. `detail` is absent for a check that passed
+ * with nothing to add, which is why `record` takes it as optional and why the
+ * summary prints `f.detail` unguarded only on failures that always have one.
+ *
+ * @typedef {{ name: string, ok: boolean, detail: string | undefined }} GateResult
+ */
+
+/**
+ * `scripts/gate/baseline.json`, the recorded manifest of test identities.
+ *
+ * `tests` is optional because a baseline written by an older gate need not have
+ * it, and `minTestCount` because the gate compares it rather than requiring it.
+ * `recordedAt` and `testCount` are written and never read, so they are not here.
+ *
+ * @typedef {{ tests?: string[], minTestCount?: number }} Baseline
+ */
+
 // ---------------------------------------------------------------------------
 // The two flags, and the one thing that must not be a flag.
 // ---------------------------------------------------------------------------
@@ -91,6 +134,8 @@ const allowRemovalsRaw = allowRemovalsAt === -1 ? undefined : process.argv[allow
  * `--ci` and a CI runner have nobody to answer at all, and the failure mode of
  * the unattended case is a gate that hangs rather than a gate that refuses. The
  * flag has the same force and the same receipt wherever it is typed.
+ *
+ * @param {string} problem
  */
 const usageError = (problem) => {
   process.stderr.write(
@@ -122,13 +167,25 @@ if (allowRemovalsAt !== -1) {
  */
 const MIN_TEST_COUNT = 744
 
+/** @type {GateResult[]} */
 const results = []
+
+/**
+ * @param {string} name
+ * @param {boolean} ok
+ * @param {string} [detail]
+ */
 const record = (name, ok, detail) => {
   results.push({ name, ok, detail })
   const mark = ok ? 'PASS' : 'FAIL'
   process.stdout.write(`  [${mark}] ${name}${detail ? ` — ${detail}` : ''}\n`)
 }
 
+/**
+ * @param {string} label
+ * @param {string} command
+ * @param {string[]} args
+ */
 const run = (label, command, args) => {
   process.stdout.write(`\n── ${label}\n`)
   const result = spawnSync(command, args, {
@@ -147,6 +204,9 @@ const run = (label, command, args) => {
  * two are separable without asking `tsc` to tell them apart. That has to be done:
  * a red typecheck that also printed the whole 769-entry file list would bury the
  * three errors that caused it, and this gate's output is read by people.
+ *
+ * @param {string} line
+ * @returns {boolean}
  */
 const isListedFile = (line) => /^[A-Za-z]:[\\/]/.test(line) || line.startsWith('/')
 
@@ -161,6 +221,11 @@ const isListedFile = (line) => /^[A-Za-z]:[\\/]/.test(line) || line.startsWith('
  *
  * Output is buffered rather than inherited, and only the diagnostics are written
  * back when the check fails, so a red typecheck reads as it did before.
+ *
+ * @param {string} label
+ * @param {string} command
+ * @param {string[]} args
+ * @returns {{ ok: boolean, listed: string[] }}
  */
 const runCapturing = (label, command, args) => {
   process.stdout.write(`\n── ${label}\n`)
@@ -184,7 +249,12 @@ const runCapturing = (label, command, args) => {
   return { ok, listed: lines.map((line) => line.trim()).filter(isListedFile) }
 }
 
-/** One path as the two sides of a comparison both spell it. */
+/**
+ * One path as the two sides of a comparison both spell it.
+ *
+ * @param {string} file
+ * @returns {string}
+ */
 const comparePath = (file) => file.replace(/\\/g, '/').toLowerCase()
 
 /**
@@ -261,10 +331,15 @@ try {
 const testsPassed = run('tests', 'npx', [...npx, 'vitest', 'run', '--reporter=json', `--outputFile=${reportPath}`, '--silent'])
 record('tests', testsPassed)
 
+/**
+ * The vitest report this run wrote, or `null` when there is nothing to read.
+ *
+ * @returns {VitestReport | null}
+ */
 const readRun = () => {
   if (!existsSync(reportPath)) return null
   try {
-    return JSON.parse(readFileSync(reportPath, 'utf8'))
+    return /** @type {VitestReport} */ (JSON.parse(readFileSync(reportPath, 'utf8')))
   } catch {
     return null
   }
@@ -280,6 +355,10 @@ const readRun = () => {
  * than an identity, because an identity that embeds `C:/Users/...` compares
  * equal only on the machine that recorded it and is invisibly deletable
  * everywhere else.
+ *
+ * @param {string} file
+ * @param {string} testName
+ * @returns {{ identity: string, error: TestIdentityError | null }}
  */
 const identityFor = (file, testName) => {
   try {
@@ -302,7 +381,14 @@ const identityFor = (file, testName) => {
   }
 }
 
+/**
+ * Every identity in the report, plus any path that could not be given one.
+ *
+ * @param {VitestReport | null} report
+ * @returns {{ tests: string[], errors: TestIdentityError[] }}
+ */
 const currentTests = (report) => {
+  /** @type {TestIdentityError[]} */
   const errors = []
   const tests = (report?.testResults ?? []).flatMap((file) =>
     (file.assertionResults ?? []).map((t) => {
@@ -323,8 +409,12 @@ const currentTests = (report) => {
  * in CI used to say only "tests: undefined". The report has the names and
  * messages, so print them. This records nothing and changes no exit code; it
  * only makes a failure legible.
+ *
+ * @param {VitestReport | null} report
+ * @returns {{ failures: string[], errors: TestIdentityError[] }}
  */
 const failuresIn = (report) => {
+  /** @type {TestIdentityError[]} */
   const errors = []
   const failures = (report?.testResults ?? []).flatMap((file) =>
     (file.assertionResults ?? [])
@@ -347,6 +437,8 @@ const failuresIn = (report) => {
  * deletion of 121 tests legible as "121 gone" and not as one arbitrary name, and
  * an operator who cannot see the list is the operator who approves it. So print
  * every name, in both directions, whenever the delta decides something.
+ *
+ * @param {{ removed: readonly string[], added: readonly string[] }} delta
  */
 const printDelta = ({ removed, added }) => {
   if (removed.length) {
@@ -393,6 +485,9 @@ if (failedTests.length) {
  * `todo` is allowed, deliberately. `it.todo` is a written statement that a test
  * is not written yet, which is information; `.skip` is a written test switched
  * off, which is the loss of one.
+ *
+ * @param {VitestReport | null} report
+ * @returns {string[]}
  */
 const disabledTests = (report) =>
   (report?.testResults ?? []).flatMap((file) =>
@@ -422,7 +517,9 @@ if (!current.length) {
         : ' — and scripts/gate/.run.json could not be cleared first, so what is on disk may be an older run'),
   )
 } else {
-  const count = run1.numTotalTests ?? current.length
+  // `run1` cannot be null on this branch — `current` came out of it and a null
+  // report yields no tests — but only the type system needs saying so.
+  const count = run1?.numTotalTests ?? current.length
   record('test count', count >= MIN_TEST_COUNT, `${count} tests, floor is ${MIN_TEST_COUNT}`)
 
   /**
@@ -432,11 +529,17 @@ if (!current.length) {
    * is replacing is not a re-record, it is a replacement. A corrupt baseline is
    * refused rather than overwritten, because the corrupt file is the only
    * remaining record of what it said.
+   *
+   * @returns {{ present: boolean, baseline: Baseline | null, problem: string | null }}
    */
   const readBaseline = () => {
     if (!existsSync(baselinePath)) return { present: false, baseline: null, problem: null }
     try {
-      return { present: true, baseline: JSON.parse(readFileSync(baselinePath, 'utf8')), problem: null }
+      return {
+        present: true,
+        baseline: /** @type {Baseline} */ (JSON.parse(readFileSync(baselinePath, 'utf8'))),
+        problem: null,
+      }
     } catch (error) {
       return {
         present: true,
@@ -452,7 +555,8 @@ if (!current.length) {
     // baseline that every machine then inherits. Refuse rather than record.
     const unportable = [...nonPortableIdentities(current), ...identityErrors.map((error) => error.message)]
     const { baseline: previous, problem } = readBaseline()
-    const before = new Set(Array.isArray(previous?.tests) ? previous.tests : [])
+    const previousTests = Array.isArray(previous?.tests) ? previous.tests : []
+    const before = new Set(previousTests)
     const removed = [...before].filter((name) => !after.has(name))
     const added = [...after].filter((name) => !before.has(name))
     printDelta({ removed, added })
@@ -489,11 +593,12 @@ if (!current.length) {
       // Re-recording an identical baseline writes a file that differs only in
       // `recordedAt`, which is a diff that means nothing and trains people to
       // distrust the manifest. Say it is already current and leave it alone.
+      // `previousTests` rather than `previous.tests` because the `Array.isArray`
+      // narrowing of a property does not survive into the `every` callback.
       const alreadyCurrent =
         previous !== null
-        && Array.isArray(previous.tests)
-        && previous.tests.length === sorted.length
-        && sorted.every((name, at) => previous.tests[at] === name)
+        && previousTests.length === sorted.length
+        && sorted.every((name, at) => previousTests[at] === name)
         && previous.minTestCount === MIN_TEST_COUNT
       if (alreadyCurrent) {
         record('baseline re-recorded', true, `already current, ${count} tests, scripts/gate/baseline.json not rewritten`)
@@ -510,8 +615,14 @@ if (!current.length) {
       'scripts/gate/baseline.json is missing. Record it once with: node scripts/gate.mjs --update',
     )
   } else {
-    const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'))
-    const before = new Set(baseline.tests)
+    const baseline = /** @type {Baseline} */ (JSON.parse(readFileSync(baselinePath, 'utf8')))
+    // `?? []` for the type, and not only for it: `new Set(undefined)` is legal
+    // and yields an empty set, so this is the same set the line used to build. It
+    // says so out loud because an absent `tests` array is what a manifest edited
+    // by hand looks like, and `Baseline.tests` is optional for exactly that
+    // reason — this is the one place the comparison runs against a manifest the
+    // gate has not verified.
+    const before = new Set(baseline.tests ?? [])
     const removed = [...before].filter((name) => !after.has(name))
     const added = [...after].filter((name) => !before.has(name))
 

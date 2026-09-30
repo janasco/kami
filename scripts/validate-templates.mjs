@@ -1,6 +1,23 @@
 #!/usr/bin/env node
 import { createServer } from 'vite'
 
+/**
+ * The catalog, as the app declares it.
+ *
+ * `server.ssrLoadModule` hands back `Record<string, any>`, so without these the
+ * whole body is unchecked: `template.slides.length` and `slide.id` would be
+ * reads off `any`, and renaming either in `src/lib/projectTemplates.ts` or
+ * `src/types.ts` would leave this validator still printing a green line about a
+ * field that no longer exists. JSDoc `import()` is a comment, which is the only
+ * way to say this in a file node runs directly — `import type` is TypeScript
+ * syntax and node parses this with no build step.
+ *
+ * @typedef {import('../src/lib/projectTemplates').ProjectTemplate} ProjectTemplate
+ * @typedef {import('../src/lib/projectTemplates').TemplateCatalogValidation} TemplateCatalogValidation
+ * @typedef {import('../src/types').Slide} Slide
+ */
+
+/** @type {import('vite').ViteDevServer | undefined} */
 let server
 try {
   server = await createServer({
@@ -8,11 +25,22 @@ try {
     logLevel: 'silent',
     server: { middlewareMode: true },
   })
+  /**
+   * The cast is at the one boundary where the module is untyped: `ssrLoadModule`
+   * answers `Record<string, any>`, which has no index-free members and so
+   * satisfies no object type, and it is the *only* thing in this file that is
+   * `any`. Everything below — `template.slides`, `slide.id`, `slide.appIcon` —
+   * is then a checked read, so renaming one of them in the app is an error here.
+   */
   const {
     projectTemplates,
     validateProjectTemplateCatalog,
     createSlidesFromProjectTemplate,
-  } = await server.ssrLoadModule('/src/lib/projectTemplates.ts')
+  } = /** @type {{
+   *   projectTemplates: ProjectTemplate[],
+   *   validateProjectTemplateCatalog: (catalog: ProjectTemplate[]) => TemplateCatalogValidation,
+   *   createSlidesFromProjectTemplate: (template: ProjectTemplate) => Slide[],
+   * }} */ (await server.ssrLoadModule('/src/lib/projectTemplates.ts'))
   const report = validateProjectTemplateCatalog(projectTemplates)
   if (!report.valid) {
     console.error('Template catalog validation failed:')

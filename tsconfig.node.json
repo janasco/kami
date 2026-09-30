@@ -10,7 +10,9 @@
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
-    "strict": true
+    "strict": true,
+    "allowJs": true,
+    "checkJs": true
   },
   /**
    * `scripts/gate/*.ts` is in here, not left out.
@@ -34,13 +36,37 @@
    * to check 1 and compares the list against esbuild's `--metafile`, and the
    * round-trip check fails if the bundle contains a file no project here includes.
    *
-   * What is still untyped, stated so this is not read as stronger than it is: the
-   * gate's own `.mjs`. `gate.mjs`, the three validators and `testIdentity.mjs` are
-   * plain JavaScript so node runs them with no build step, and nothing
-   * typechecks them. The one the test suite imports carries a hand-written
-   * `testIdentity.d.mts`, which `tsc` reads *instead of* the implementation, so
-   * the declaration and the code can drift without anything noticing. Closing
-   * that means `checkJs` over five files, which is a different piece of work.
+   * The `.mjs` under `scripts/`, and the declaration it makes unnecessary
+   * -------------------------------------------------------------------
+   * What used to be untyped was `gate.mjs`, `testIdentity.mjs`, the three
+   * validators and `copy-spa-fallback.mjs`: plain JavaScript so node runs them
+   * with no build step, and nothing typechecked them. The one the test suite
+   * imports (`src/gate/repoRelative.test.ts`) carried a hand-written
+   * `testIdentity.d.mts`, and hand-written was the whole problem — `tsc` reads a
+   * `.d.mts` *instead of* the `.mjs` beside it, so the types it checked were the
+   * ones someone remembered rather than the ones the code has. Add a parameter or
+   * change a return shape in the implementation and the declaration keeps
+   * compiling, `tsc -b` stays green, and the gate misbehaves: the one thing a
+   * gate must not do. So `checkJs` covers the implementation and the declaration
+   * is deleted. The implementation *is* the declaration now; the test's import
+   * resolves to `testIdentity.mjs` and is typed from its own body, so a signature
+   * change is a type error instead of a silence.
+   *
+   * `tsconfig.app.json` needs `allowJs: true` for that import to resolve at all,
+   * since with no `.d.mts` there is nothing for `allowJs: false` to find. It does
+   * not set `checkJs`, so the file is checked once, here, not twice.
+   *
+   * The exclusion below is belt and braces, and the comment is honest about it:
+   * TypeScript's wildcard matching skips dot-prefixed files, so
+   * `scripts/gate/.roundtrip.mjs` — esbuild's 136 KB output, written by check 4
+   * of the gate into the directory the glob above covers — is already outside the
+   * program without it. That is a property of the file's *name*, not of anyone's
+   * intent, and it fails silently: rename the bundle and 136 KB of generated code
+   * enters the typecheck, where every diagnostic in the modules it was bundled
+   * from is reported a second time. Naming it makes the exclusion a decision.
+   * `exclude` filters `include` only, so it drops the artefact without hiding it
+   * from anything that imports it — and nothing does; it is run as a program.
    */
-  "include": ["vite.config.ts", "vitest.config.ts", "scripts/**/*.ts"]
+  "include": ["vite.config.ts", "vitest.config.ts", "scripts/**/*.ts", "scripts/**/*.mjs"],
+  "exclude": ["scripts/gate/.roundtrip.mjs"]
 }
